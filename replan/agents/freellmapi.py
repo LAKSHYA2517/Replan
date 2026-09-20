@@ -10,10 +10,10 @@ continuous speech, and a final transcription after END_SILENCE_MS of
 silence following speech. The barge-in path (replan/agents/audio.py) is
 unaffected — it is driven by BargeInDetector, not by this module.
 
-No time.time()/time.monotonic()/datetime.now() calls here — timestamps
-come from an injected `clock` with a `.now() -> float` method, per
-AGENTS.md. Pass replan.clock.RealClock() for live use, a VirtualClock or
-a stub for tests.
+No wall-clock reads happen here — timestamps come from an injected
+`clock` with a `.now() -> float` method, per AGENTS.md. Pass
+replan.clock.RealClock() for live use, a VirtualClock or a stub for
+tests.
 """
 
 from __future__ import annotations
