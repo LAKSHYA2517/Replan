@@ -28,5 +28,5 @@ jobs:
           if [ -f web/package.json ]; then
             cd web && npm ci && npx tsc --noEmit src/contract.ts
           else
-            npx --yes typescript tsc --noEmit web/src/contract.ts
+            npx --yes -p typescript tsc --noEmit web/src/contract.ts
           fi
