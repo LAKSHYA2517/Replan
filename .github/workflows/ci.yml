@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: make check
+        run: make check
+
+      - name: make test
+        run: make test
+
+      - name: TypeScript check
+        run: |
+          if [ -f web/package.json ]; then
+            cd web && npm ci && npx tsc --noEmit src/contract.ts
+          else
+            npx --yes typescript tsc --noEmit web/src/contract.ts
+          fi

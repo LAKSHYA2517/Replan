@@ -1,0 +1,29 @@
+[project]
+name = "replan"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic==2.9.2",
+    "pytest==8.3.3",
+    "pytest-asyncio==0.24.0",
+    "hypothesis==6.115.6",
+    "websockets==13.1",
+    "numpy==2.1.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.3",
+    "pytest-asyncio==0.24.0",
+    "hypothesis==6.115.6",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["replan*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
