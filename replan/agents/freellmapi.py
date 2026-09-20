@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import wave
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -30,6 +31,7 @@ import webrtcvad
 
 from replan.agents.audio import FRAME_MS, INPUT_RATE, OUTPUT_RATE
 from replan.agents.base import SpeechAgent, Transcript
+from replan.schemas import SessionState
 
 PARTIAL_WINDOW_MS = 700
 END_SILENCE_MS = 600
@@ -53,6 +55,7 @@ class FreellmapiConfig:
     api_key: str
     stt_model: str
     tts_model: str
+    chat_model: str = "auto"
 
 
 def _build_wav(pcm: bytes, sample_rate: int) -> bytes:
@@ -185,3 +188,51 @@ class FreellmapiSpeechAgent(SpeechAgent):
         for task in list(self._tasks):
             task.cancel()
         await self._client.aclose()
+
+    async def compose_response(self, committed_results: list[dict], state: SessionState) -> str:
+        """Turn the commit gate's accepted results into 1-2 spoken sentences.
+
+        Grounded strictly in committed_results and state — never invents
+        content. If nothing has committed yet, returns a short honest
+        holding line instead of calling the model at all.
+        """
+        if not committed_results:
+            return "I don't have anything confirmed yet — still working on it."
+
+        system = (
+            "You are composing a short spoken reply for a voice assistant. "
+            "State only what the committed results below support — do not "
+            "add, infer, or embellish anything not present in them. Mention "
+            "the active constraints by their actual value (locality, "
+            "budget, dates, etc.) so the reply is self-evidently grounded "
+            "in the user's current request. One or two sentences, spoken "
+            "style, no markdown, no lists."
+        )
+        user = json.dumps(
+            {
+                "committed_results": committed_results,
+                "constraints": state.constraints,
+                "slots": state.slots,
+            }
+        )
+        try:
+            resp = await self._client.post(
+                "/chat/completions",
+                json={
+                    "model": self.config.chat_model,
+                    "temperature": 0,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                },
+            )
+        except httpx.HTTPError as exc:
+            raise FreellmapiError(f"compose_response request failed: {exc}") from exc
+        if resp.status_code != 200:
+            raise FreellmapiError(f"compose_response returned {resp.status_code}: {resp.text[:300]}")
+        body = resp.json()
+        try:
+            return body["choices"][0]["message"]["content"].strip()
+        except (KeyError, IndexError) as exc:
+            raise FreellmapiError(f"unexpected chat completion response shape: {body}") from exc
