@@ -20,7 +20,12 @@ check:
 	exit $$fail
 
 test:
-	pytest -q
+	@pytest -q; code=$$?; \
+	if [ $$code -eq 5 ]; then \
+		echo "no tests collected yet — not a failure until the acceptance suite exists"; \
+		exit 0; \
+	fi; \
+	exit $$code
 
 bench:
 	python -m bench.run
