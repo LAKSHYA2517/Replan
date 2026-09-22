@@ -11,7 +11,6 @@ coroutine, where store.current may already have moved.
 from __future__ import annotations
 
 import asyncio
-import uuid
 from collections import deque
 from collections.abc import Awaitable, Callable
 
@@ -75,6 +74,7 @@ class Executor:
         self.results: asyncio.Queue[ToolResult] = asyncio.Queue()
         self._running: dict[str, asyncio.Task] = {}  # call_id -> asyncio.Task
         self._frozen: dict[str, ToolResult] = {}  # call_id -> parked result
+        self._call_seq = 0  # deterministic call_id source; NOT uuid4 (unseeded, breaks replay)
 
     def dispatch(self, task: PlanTask, plan: ExecutionPlan) -> str | None:
         spec = TOOL_SPECS[task.tool]
@@ -101,12 +101,16 @@ class Executor:
             self._recorder.log(EventType.CACHE_HIT, task_id=task.id, tool=task.tool, fingerprint=fp)
             return None
 
-        call_id = str(uuid.uuid4())
+        self._call_seq += 1
+        call_id = f"call-{self._call_seq}"
         idem = h(task.tool, resolved_args, fp)
         task.call_id = call_id
         task.dispatch_fp = fp
         task.status = TaskStatus.RUNNING
-        self._recorder.log(EventType.TASK_DISPATCH, task_id=task.id, call_id=call_id, tool=task.tool, dispatch_fp=fp)
+        self._recorder.log(
+            EventType.TASK_DISPATCH,
+            task_id=task.id, call_id=call_id, tool=task.tool, dispatch_fp=fp, idem=idem,
+        )
 
         if task.speculative:
             self._governor.on_launch(spec["cost"])
