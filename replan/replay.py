@@ -5,11 +5,11 @@ tool or LLM calls — every external effect is played back from the trace.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 
 from replan.clock import VirtualClock
-from replan.hashing import h
-from replan.schemas import Event, EventType
+from replan.schemas import Event, EventType, Proposal
 from replan.tools.registry import TOOL_SPECS
 
 # The one EventType that unambiguously means "an interruption happened" in
@@ -65,24 +65,45 @@ def _make_replaying_tools(clock: VirtualClock, trace: list[Event]) -> dict[str, 
 
 
 def replay(trace: list[Event], seed: int):
-    """Build a fresh Runtime whose tool layer replays trace exactly,
-    then feed the trace back through it in sequence order."""
-    from replan.runtime import Runtime  # lazy: avoids a hard import-time
-    # dependency from this leaf module on the orchestrator, and sidesteps
-    # any accidental import cycle (Runtime never needs to import replay).
+    """Build a fresh Runtime whose tool layer replays trace exactly, then
+    feed the trace's STATE_PATCH/CHECKPOINT/RESTORE events (the actual
+    external inputs that drove the original run) back through it in
+    sequence order. TASK_DISPATCH/VERDICT/etc are outputs, re-derived for
+    real by Runtime's own logic — not re-injected.
 
-    clock = VirtualClock()
-    tools = _make_replaying_tools(clock, trace)
-    runtime = Runtime(clock=clock, seed=seed, policy=None, tools=tools, chaos="none")
-    runtime.feed(trace)
-    return runtime
+    Policy defaults to REPLAN (replay()'s own two-arg signature has no room
+    for a third parameter, and REPLAN is what every replay-fidelity claim
+    in this project is actually about); a trace recorded under a different
+    policy is a known limitation, not silently handled.
+    """
+    from replan.runtime import Policy, Runtime  # lazy: sidesteps any import
+    # cycle risk (Runtime never needs to import this leaf module).
+
+    async def _drive() -> "Runtime":
+        clock = VirtualClock()
+        tools = _make_replaying_tools(clock, trace)
+        runtime = Runtime(clock=clock, seed=seed, policy=Policy.REPLAN, tools=tools, chaos="none")
+        for event in trace:
+            if event.type == EventType.STATE_PATCH:
+                proposal = Proposal(kind="state_patch", patch=event.payload["patch"])
+                await runtime.apply_proposal_and_dispatch(proposal)  # drains internally
+            elif event.type == EventType.CHECKPOINT:
+                runtime.checkpoint(event.payload["name"])
+            elif event.type == EventType.RESTORE:
+                runtime.restore(event.payload["name"])
+        return runtime
+
+    return asyncio.run(_drive())
 
 
 def verify(trace: list[Event], seed: int) -> bool:
-    if not trace:
-        return True
+    """Replay and compare the final StateStore.chain_hash() against the
+    value recorded on the trace's last STATE_PATCH event."""
+    original = [e.payload["chain_hash"] for e in trace if e.type == EventType.STATE_PATCH]
+    if not original:
+        return True  # nothing that changed state; trivially consistent
     runtime = replay(trace, seed)
-    return runtime.store.chain_hash() == trace[-1].payload.get("chain_hash")
+    return runtime.store.chain_hash() == original[-1]
 
 
 def _shift_interruptions(trace: list[Event], shift_interrupt: float) -> list[Event]:

@@ -61,6 +61,11 @@ class BudgetGovernor:
     def reset_turn(self) -> None:
         self._cost_this_turn = 0.0
 
+    @property
+    def hit_rate(self) -> float:
+        """Current rolling hit rate, for Runtime.metrics.speculation_hit_rate."""
+        return sum(self._window) / len(self._window) if self._window else 0.0
+
 
 class Executor:
     def __init__(self, tools: dict[str, Callable[[dict, str], Awaitable[dict]]],

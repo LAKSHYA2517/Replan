@@ -66,9 +66,23 @@ def reconcile(old_plan: ExecutionPlan, new_plan: ExecutionPlan, new_state: Sessi
         result.added.append(task)
 
     for task in old_plan.tasks.values():
-        if task.status in _INVALIDATABLE and task.dispatch_fp not in new_fps:
+        if task.dispatch_fp in new_fps:
+            continue
+        if task.status in _INVALIDATABLE:
             task.status = TaskStatus.INVALIDATED
             result.invalidated.append(task)
+            compensator = TOOL_SPECS.get(task.tool, {}).get("compensator")
+            if compensator and task.dispatch_fp in cache:
+                result.compensate.append(task)
+        elif task.status is TaskStatus.DONE:
+            # The work already committed (e.g. a held reservation) but is
+            # no longer wanted under the new state. It isn't "invalidated"
+            # — it finished successfully — but its REVERSIBLE effect still
+            # needs undoing. This is the case the literal per-status filter
+            # above misses on its own: by the time reconcile() runs, a
+            # landed effect's task is already DONE, not RUNNING/FROZEN/
+            # PENDING. Caught via integration testing through runtime.py —
+            # the C2/demo compensation beat depends on this.
             compensator = TOOL_SPECS.get(task.tool, {}).get("compensator")
             if compensator and task.dispatch_fp in cache:
                 result.compensate.append(task)
