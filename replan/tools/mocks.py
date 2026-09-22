@@ -59,4 +59,6 @@ def make_mock_tool(name: str, clock, rng: Random, latency: float):
             "pay_at_property": rng.choice((True, False)),
         }
 
+    tool.__name__ = name
+    tool.base_latency = latency
     return tool
