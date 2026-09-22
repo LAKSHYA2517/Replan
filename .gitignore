@@ -6,7 +6,7 @@ __pycache__/
 venv/
 node_modules/
 web/dist/
-bench/results.jsonl
-bench/figures/
+bench/.mplconfig/
+tests/.tmp_bench/
 .DS_Store
 .env

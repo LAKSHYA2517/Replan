@@ -2,6 +2,7 @@ import inspect
 
 import pytest
 
+from bench.run import run_episode
 from bench.scenarios import SCENARIOS
 from replan.clock import VirtualClock
 from replan.policies import CancelAllPolicy, NaivePolicy, RePlanPolicy
@@ -110,14 +111,19 @@ def test_policies_expose_runtime_interface(policy_class):
         )
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("policy_class", [NaivePolicy, CancelAllPolicy, RePlanPolicy])
-async def test_all_policies_run_every_scenario(policy_class):
-    for scenario_name in SCENARIOS:
-        assert scenario_name == "smarthome_pivot"
-        policy = await _run_late_result_episode(policy_class)
-        assert policy.recorder.verify_chain()
-        assert DEVICE_STATE["temperatures"]["living room"] == 24
+@pytest.mark.parametrize("scenario_name", SCENARIOS)
+def test_all_policies_run_every_scenario(policy_class, scenario_name):
+    policy_name = {
+        NaivePolicy: "naive",
+        CancelAllPolicy: "cancel_all",
+        RePlanPolicy: "replan",
+    }[policy_class]
+    row = run_episode(scenario_name, 0.6, "fast", "none", 0, policy_name)
+
+    assert row["replay_ok"] is True
+    assert row["trace_coverage"] == 1.0
+    assert row["dangling_effects"] == 0
 
 
 @pytest.mark.asyncio
