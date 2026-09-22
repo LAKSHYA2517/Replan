@@ -81,6 +81,9 @@ class CommitGate:
             task_id=result.task_id,
             verdict=verdict.value,
             reason=reason,
+            ok=result.ok,
+            payload=result.payload,
+            error=result.error,
         )
         self.ledger.append(
             CommitDecision(
