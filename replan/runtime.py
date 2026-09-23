@@ -17,6 +17,7 @@ the accompanying summary rather than silently invented:
 
 from __future__ import annotations
 
+import asyncio
 import os
 import random
 from dataclasses import dataclass
@@ -93,7 +94,8 @@ class Runtime:
         self.plan = ExecutionPlan(id="plan-v0", tasks={})
         self.paused = False
         self._deferred: list[tuple[str, str]] = []  # (method, text), queued while paused
-        self._pending_compensations: set[str] = set()  # dispatch_fp of fired, unconfirmed compensators
+        self._paused_task_ids: set[str] = set()
+        self._pending_compensations: set[str] = set()  # task ids of unfinished compensators
         self._last_reconciliation: Reconciliation | None = None
         self.metrics = Metrics()
 
@@ -193,14 +195,38 @@ class Runtime:
         return state
 
     def pause(self) -> None:
-        # Reserved no-op per A7's brief: log only. self.paused is NOT
-        # flipped here — the flag and the defer-checks above already exist
-        # so A8 (day 6) only has to fill these two bodies in, never
-        # reopening on_partial/on_final.
-        self.recorder.log(EventType.PAUSE)
+        self._paused_task_ids = {
+            task.id for task in self.plan.tasks.values()
+            if task.status is TaskStatus.RUNNING
+        }
+        checkpoint = f"auto-pause-{self.store.current.version}"
+        self.checkpoint(checkpoint)
+        self.executor.freeze(self._paused_task_ids, self.plan)
+        self.paused = True
+        self.recorder.log(
+            EventType.PAUSE,
+            checkpoint=checkpoint,
+            task_ids=sorted(self._paused_task_ids),
+        )
 
     def resume(self) -> None:
-        self.recorder.log(EventType.RESUME)
+        task_ids = set(self._paused_task_ids)
+        self.executor.thaw(task_ids, self.plan)
+        self.executor.release_frozen(self.plan)
+        self._paused_task_ids.clear()
+        self.paused = False
+        self.recorder.log(EventType.RESUME, task_ids=sorted(task_ids))
+
+        deferred, self._deferred = self._deferred, []
+        if deferred:
+            async def drain_deferred() -> None:
+                for method, text in deferred:
+                    if method == "partial":
+                        self.on_partial(text)
+                    else:
+                        await self.on_final(text)
+
+            asyncio.create_task(drain_deferred())
 
     # ------------------------------------------------------------------
     # internals
@@ -227,9 +253,11 @@ class Runtime:
         comp_task = PlanTask(id=f"compensate-{task.id}", tool=compensator_name, arg_spec=dict(landed_payload))
         plan.tasks[comp_task.id] = comp_task
         self.recorder.log(EventType.COMPENSATING, task_id=task.id, compensator=compensator_name)
-        self._pending_compensations.add(task.dispatch_fp)
+        self._pending_compensations.add(comp_task.id)
         try:
-            self.executor.dispatch(comp_task, plan)
+            call_id = self.executor.dispatch(comp_task, plan)
+            if call_id is None and comp_task.status is TaskStatus.DONE:
+                self._pending_compensations.discard(comp_task.id)
         except SpeculationRefused:
             pass
 
@@ -246,7 +274,5 @@ class Runtime:
             self.metrics.time_to_first_valid_result = commits[0].t
         for decision in ledger:
             if decision.verdict is Verdict.COMMIT:
-                task = self.plan.tasks.get(decision.task_id)
-                fp = task.dispatch_fp if task else None
-                self._pending_compensations.discard(fp)
+                self._pending_compensations.discard(decision.task_id)
         self.metrics.dangling_effects = len(self._pending_compensations)
