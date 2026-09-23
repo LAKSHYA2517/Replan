@@ -29,6 +29,10 @@ _CLARIFY_RE = re.compile(
     r"\b(?:what was|say that again|repeat|how much|which one)\b",
     re.IGNORECASE,
 )
+_CONFIRM_CUE_RE = re.compile(
+    r"\b(?:yes,?\s*book it|go ahead|confirm|do it|that one)\b",
+    re.IGNORECASE,
+)
 _PIVOT_CUE_RE = re.compile(
     r"\b(?:actually|instead|no wait|scratch that|make it|change it to|rather)\b",
     re.IGNORECASE,
@@ -70,6 +74,9 @@ def hypothesise(partial: str, at: float) -> Hypothesis | None:
 
     if _CLARIFY_RE.search(partial):
         return Hypothesis(kind=Interruption.CLARIFY, confidence=0.7, changed_paths=set(), at=at)
+
+    if _CONFIRM_CUE_RE.search(partial):
+        return Hypothesis(kind=Interruption.CONFIRM, confidence=0.9, changed_paths=set(), at=at)
 
     if _PIVOT_CUE_RE.search(partial):
         paths = {path for path, cue in SLOT_CUES.items() if cue.search(partial)}

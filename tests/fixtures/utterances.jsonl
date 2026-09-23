@@ -62,6 +62,12 @@
 {"text": "no wait give me a second", "label": "REFINE"}
 {"text": "scratch that, let me reconsider", "label": "REFINE"}
 {"text": "rather, hmm", "label": "REFINE"}
+{"text": "yes, book it", "label": "CONFIRM"}
+{"text": "go ahead", "label": "CONFIRM"}
+{"text": "confirm", "label": "CONFIRM"}
+{"text": "do it", "label": "CONFIRM"}
+{"text": "that one", "label": "CONFIRM"}
+{"text": "yes go ahead and confirm it", "label": "CONFIRM"}
 {"text": "I'm looking for a hotel for this weekend", "label": "NONE"}
 {"text": "the weather looks nice today", "label": "NONE"}
 {"text": "tell me a joke", "label": "NONE"}

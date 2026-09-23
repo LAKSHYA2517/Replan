@@ -38,6 +38,8 @@ class FastPath:
         answer_clarify: Callable[[], Awaitable[str]],
         on_final: Callable[[str, float], Awaitable[object]],
         recorder=None,
+        get_pending_reservation_ids: Callable[[], list[str]] | None = None,
+        emit_user_confirmed: Callable[[str], None] | None = None,
     ) -> None:
         self.freeze_controller = freeze_controller
         self.get_plan = get_plan
@@ -46,6 +48,12 @@ class FastPath:
         self.answer_clarify = answer_clarify
         self._on_final = on_final
         self.recorder = recorder
+        # B7 — C's ReservationBook doesn't exist yet, so both of these are
+        # injected and default to "nothing pending". Wiring them to the
+        # real reservation book once C2 lands is a one-line swap here, not
+        # a rewrite.
+        self.get_pending_reservation_ids = get_pending_reservation_ids or (lambda: [])
+        self.emit_user_confirmed = emit_user_confirmed or (lambda reservation_id: None)
 
     def on_interrupt_signal(self, t: float) -> None:
         """T0. No classification, no decision — audio is already stopped
@@ -70,6 +78,10 @@ class FastPath:
             asyncio.create_task(self._answer_and_speak())
             return
 
+        if hyp.kind is Interruption.CONFIRM:
+            self._handle_confirm()
+            return
+
         plan = self.get_plan()
         radius = self.freeze_controller.on_partial(hyp, plan)
         if radius:
@@ -78,6 +90,17 @@ class FastPath:
     async def _answer_and_speak(self) -> None:
         answer = await self.answer_clarify()
         await self.speak(answer)
+
+    def _handle_confirm(self) -> None:
+        """A confirmation must apply to one named reservation, never to
+        the session at large — if there's more than one pending, ask
+        rather than guess, and emit nothing."""
+        pending = self.get_pending_reservation_ids()
+        if len(pending) == 1:
+            self.emit_user_confirmed(pending[0])
+        elif len(pending) > 1:
+            asyncio.create_task(self.speak("Which reservation would you like me to confirm?"))
+        # zero pending: nothing to confirm, silently no-op
 
     async def on_final(self, text: str, t: float):
         """T2. Hands off to the runtime's own on_final — this class owns
