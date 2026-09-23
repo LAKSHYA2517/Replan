@@ -1,0 +1,370 @@
+[
+  {
+    "seq": 1,
+    "t": 0.05,
+    "state_version": 1,
+    "type": "state_patch",
+    "payload": {
+      "patch": {
+        "slots": { "locality": "delhi", "dates": "weekend", "breakfast": true },
+        "constraints": { "budget": 5000 },
+        "policy": { "booking_enabled": true }
+      },
+      "changed_paths": ["slots.locality", "slots.dates", "slots.breakfast", "constraints.budget", "policy.booking_enabled"]
+    },
+    "prev_hash": "0000000000000000",
+    "hash": "1a2b3c4d5e6f7a8b"
+  },
+  {
+    "seq": 2,
+    "t": 0.10,
+    "state_version": 1,
+    "type": "task_dispatch",
+    "payload": {
+      "task_id": "task_delhi_search",
+      "call_id": "c_delhi_search_1",
+      "tool": "search_hotels",
+      "args": { "locality": "delhi", "budget": 5000, "breakfast": true },
+      "dispatch_fp": "fp_delhi_search_v1",
+      "speculative": false,
+      "effect": "pure"
+    },
+    "prev_hash": "1a2b3c4d5e6f7a8b",
+    "hash": "2b3c4d5e6f7a8b9c"
+  },
+  {
+    "seq": 3,
+    "t": 0.15,
+    "state_version": 1,
+    "type": "task_dispatch",
+    "payload": {
+      "task_id": "task_delhi_avail",
+      "call_id": "c_delhi_avail_2",
+      "tool": "availability",
+      "args": { "locality": "delhi", "dates": "weekend" },
+      "dispatch_fp": "fp_delhi_avail_v1",
+      "speculative": false,
+      "effect": "pure"
+    },
+    "prev_hash": "2b3c4d5e6f7a8b9c",
+    "hash": "3c4d5e6f7a8b9c0d"
+  },
+  {
+    "seq": 4,
+    "t": 0.20,
+    "state_version": 1,
+    "type": "task_dispatch",
+    "payload": {
+      "task_id": "task_loyalty",
+      "call_id": "c_loyalty_3",
+      "tool": "loyalty_status",
+      "args": { "user_id": "u_992" },
+      "dispatch_fp": "fp_loyalty_v1",
+      "speculative": true,
+      "effect": "pure"
+    },
+    "prev_hash": "3c4d5e6f7a8b9c0d",
+    "hash": "4d5e6f7a8b9c0d1e"
+  },
+  {
+    "seq": 5,
+    "t": 0.25,
+    "state_version": 1,
+    "type": "task_dispatch",
+    "payload": {
+      "task_id": "task_policy",
+      "call_id": "c_policy_4",
+      "tool": "booking_policy",
+      "args": { "locality": "delhi" },
+      "dispatch_fp": "fp_policy_v1",
+      "speculative": true,
+      "effect": "pure"
+    },
+    "prev_hash": "4d5e6f7a8b9c0d1e",
+    "hash": "5e6f7a8b9c0d1e2f"
+  },
+  {
+    "seq": 6,
+    "t": 0.35,
+    "state_version": 1,
+    "type": "verdict",
+    "payload": {
+      "call_id": "c_loyalty_3",
+      "task_id": "task_loyalty",
+      "verdict": "commit",
+      "reason": "dispatch fp fp_loyalty_v1 == current fp (v1)",
+      "result": { "status": "gold", "discount_pct": 10 }
+    },
+    "prev_hash": "5e6f7a8b9c0d1e2f",
+    "hash": "6f7a8b9c0d1e2f3a"
+  },
+  {
+    "seq": 7,
+    "t": 0.50,
+    "state_version": 1,
+    "type": "verdict",
+    "payload": {
+      "call_id": "c_policy_4",
+      "task_id": "task_policy",
+      "verdict": "commit",
+      "reason": "dispatch fp fp_policy_v1 == current fp (v1)",
+      "result": { "free_cancellation": true, "tax_pct": 12 }
+    },
+    "prev_hash": "6f7a8b9c0d1e2f3a",
+    "hash": "7a8b9c0d1e2f3a4b"
+  },
+  {
+    "seq": 8,
+    "t": 0.60,
+    "state_version": 1,
+    "type": "task_dispatch",
+    "payload": {
+      "task_id": "task_delhi_res",
+      "call_id": "c_delhi_res_5",
+      "tool": "reserve_room",
+      "args": { "locality": "delhi", "room_type": "deluxe" },
+      "dispatch_fp": "fp_delhi_res_v1",
+      "speculative": true,
+      "effect": "reversible"
+    },
+    "prev_hash": "7a8b9c0d1e2f3a4b",
+    "hash": "8b9c0d1e2f3a4b5c"
+  },
+  {
+    "seq": 9,
+    "t": 0.85,
+    "state_version": 1,
+    "type": "speech_envelope",
+    "payload": {
+      "start_t": 0.85,
+      "end_t": 1.85,
+      "text_partial": "Actually Mumbai..."
+    },
+    "prev_hash": "8b9c0d1e2f3a4b5c",
+    "hash": "9c0d1e2f3a4b5c6d"
+  },
+  {
+    "seq": 10,
+    "t": 0.95,
+    "state_version": 1,
+    "type": "barge_in",
+    "payload": {
+      "trigger": "dual_vad_and_provider",
+      "latency_ms": 42
+    },
+    "prev_hash": "9c0d1e2f3a4b5c6d",
+    "hash": "0d1e2f3a4b5c6d7e"
+  },
+  {
+    "seq": 11,
+    "t": 0.95,
+    "state_version": 1,
+    "type": "task_freeze",
+    "payload": {
+      "hypothesis": {
+        "kind": "pivot",
+        "confidence": 0.88,
+        "changed_paths": ["slots.locality"],
+        "at": 0.95
+      },
+      "frozen_tasks": ["task_delhi_search", "task_delhi_avail", "task_delhi_res"],
+      "lead_time_ms": 900
+    },
+    "prev_hash": "0d1e2f3a4b5c6d7e",
+    "hash": "1e2f3a4b5c6d7e8f"
+  },
+  {
+    "seq": 12,
+    "t": 1.85,
+    "state_version": 2,
+    "type": "state_patch",
+    "payload": {
+      "patch": {
+        "slots": { "locality": "mumbai" }
+      },
+      "changed_paths": ["slots.locality"],
+      "utterance": "Actually Mumbai, but keep everything else."
+    },
+    "prev_hash": "1e2f3a4b5c6d7e8f",
+    "hash": "2f3a4b5c6d7e8f9a"
+  },
+  {
+    "seq": 13,
+    "t": 1.90,
+    "state_version": 2,
+    "type": "reconcile",
+    "payload": {
+      "old_plan_id": "plan_v1",
+      "new_plan_id": "plan_v2",
+      "adopted": ["task_loyalty", "task_policy"],
+      "reused_from_cache": [],
+      "invalidated": ["task_delhi_search", "task_delhi_avail"],
+      "added": ["task_mumbai_search", "task_mumbai_avail"],
+      "compensate": ["task_delhi_res"],
+      "reuse_ratio": 0.40
+    },
+    "prev_hash": "2f3a4b5c6d7e8f9a",
+    "hash": "3a4b5c6d7e8f9a0b"
+  },
+  {
+    "seq": 14,
+    "t": 2.05,
+    "state_version": 2,
+    "type": "compensating",
+    "payload": {
+      "task_id": "task_delhi_res",
+      "action": "release_room",
+      "reservation_id": "res-8812",
+      "reason": "Invalidated by locality pivot to Mumbai"
+    },
+    "prev_hash": "3a4b5c6d7e8f9a0b",
+    "hash": "4b5c6d7e8f9a0b1c"
+  },
+  {
+    "seq": 15,
+    "t": 2.15,
+    "state_version": 2,
+    "type": "task_dispatch",
+    "payload": {
+      "task_id": "task_mumbai_search",
+      "call_id": "c_mumbai_search_6",
+      "tool": "search_hotels",
+      "args": { "locality": "mumbai", "budget": 5000, "breakfast": true },
+      "dispatch_fp": "fp_mumbai_search_v2",
+      "speculative": false,
+      "effect": "pure"
+    },
+    "prev_hash": "4b5c6d7e8f9a0b1c",
+    "hash": "5c6d7e8f9a0b1c2d"
+  },
+  {
+    "seq": 16,
+    "t": 2.20,
+    "state_version": 2,
+    "type": "task_dispatch",
+    "payload": {
+      "task_id": "task_mumbai_avail",
+      "call_id": "c_mumbai_avail_7",
+      "tool": "availability",
+      "args": { "locality": "mumbai", "dates": "weekend" },
+      "dispatch_fp": "fp_mumbai_avail_v2",
+      "speculative": false,
+      "effect": "pure"
+    },
+    "prev_hash": "5c6d7e8f9a0b1c2d",
+    "hash": "6d7e8f9a0b1c2d3e"
+  },
+  {
+    "seq": 17,
+    "t": 2.50,
+    "state_version": 2,
+    "type": "verdict",
+    "payload": {
+      "call_id": "c_delhi_search_1",
+      "task_id": "task_delhi_search",
+      "verdict": "stale",
+      "reason": "dispatch fp fp_delhi_search_v1 != current fp_mumbai_search_v2 (dispatched at v1, now v2)",
+      "dispatched_at_v": 1,
+      "current_v": 2
+    },
+    "prev_hash": "6d7e8f9a0b1c2d3e",
+    "hash": "7e8f9a0b1c2d3e4f"
+  },
+  {
+    "seq": 18,
+    "t": 2.80,
+    "state_version": 2,
+    "type": "verdict",
+    "payload": {
+      "call_id": "c_delhi_search_1",
+      "task_id": "task_delhi_search",
+      "verdict": "duplicate",
+      "reason": "call_id c_delhi_search_1 already adjudicated"
+    },
+    "prev_hash": "7e8f9a0b1c2d3e4f",
+    "hash": "8f9a0b1c2d3e4f5a"
+  },
+  {
+    "seq": 19,
+    "t": 3.10,
+    "state_version": 2,
+    "type": "verdict",
+    "payload": {
+      "call_id": "c_mumbai_search_6",
+      "task_id": "task_mumbai_search",
+      "verdict": "commit",
+      "reason": "dispatch fp fp_mumbai_search_v2 == current fp (v2)",
+      "result": {
+        "hotels": [
+          { "name": "Sea Princess Juhu", "price": 4600, "breakfast": true },
+          { "name": "Bandra Palms", "price": 4900, "breakfast": true }
+        ]
+      }
+    },
+    "prev_hash": "8f9a0b1c2d3e4f5a",
+    "hash": "9a0b1c2d3e4f5a6b"
+  },
+  {
+    "seq": 20,
+    "t": 3.30,
+    "state_version": 2,
+    "type": "verdict",
+    "payload": {
+      "call_id": "c_mumbai_avail_7",
+      "task_id": "task_mumbai_avail",
+      "verdict": "commit",
+      "reason": "dispatch fp fp_mumbai_avail_v2 == current fp (v2)",
+      "result": { "available": true, "rooms_left": 3 }
+    },
+    "prev_hash": "9a0b1c2d3e4f5a6b",
+    "hash": "0b1c2d3e4f5a6b7c"
+  },
+  {
+    "seq": 21,
+    "t": 3.60,
+    "state_version": 3,
+    "type": "state_patch",
+    "payload": {
+      "patch": {
+        "policy": { "booking_enabled": false }
+      },
+      "changed_paths": ["policy.booking_enabled"],
+      "utterance": "Don't book anything; just show me options."
+    },
+    "prev_hash": "0b1c2d3e4f5a6b7c",
+    "hash": "1c2d3e4f5a6b7c8d"
+  },
+  {
+    "seq": 22,
+    "t": 3.80,
+    "state_version": 4,
+    "type": "state_patch",
+    "payload": {
+      "patch": {
+        "slots": { "locality": "delhi" }
+      },
+      "changed_paths": ["slots.locality"],
+      "utterance": "Actually let's go back to Delhi."
+    },
+    "prev_hash": "1c2d3e4f5a6b7c8d",
+    "hash": "2c3d4e5f6a7b8c9d"
+  },
+  {
+    "seq": 23,
+    "t": 3.85,
+    "state_version": 4,
+    "type": "reconcile",
+    "payload": {
+      "old_plan_id": "plan_v3",
+      "new_plan_id": "plan_v4",
+      "adopted": ["task_loyalty", "task_policy"],
+      "reused_from_cache": ["task_delhi_search_memo", "task_delhi_avail_memo"],
+      "invalidated": ["task_mumbai_search", "task_mumbai_avail"],
+      "added": [],
+      "compensate": [],
+      "reuse_ratio": 1.00
+    },
+    "prev_hash": "2c3d4e5f6a7b8c9d",
+    "hash": "3d4e5f6a7b8c9d0e"
+  }
+]
