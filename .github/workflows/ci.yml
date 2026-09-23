@@ -14,6 +14,10 @@ jobs:
         with:
           python-version: "3.11"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
@@ -26,7 +30,7 @@ jobs:
       - name: TypeScript check
         run: |
           if [ -f web/package.json ]; then
-            cd web && npm ci && npx tsc --noEmit src/contract.ts
+            cd web && npm ci && npx tsc --noEmit
           else
             npx --yes -p typescript tsc --noEmit web/src/contract.ts
           fi
