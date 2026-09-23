@@ -28,6 +28,27 @@ from replan.schemas import EventType, ExecutionPlan, Interruption
 FILLER_TEXT = "got it—"
 
 
+def pending_reservation_ids(reservation_book) -> list[str]:
+    """Adapter for FastPath's get_pending_reservation_ids over a real
+    replan.tools.reservation.ReservationBook (C2) — unconfirmed held
+    reservations only. A confirmed-but-not-yet-released reservation is no
+    longer "pending"; nothing left to confirm on it."""
+    return [rid for rid, r in reservation_book.held.items() if not r.confirmed]
+
+
+def make_user_confirmed_emitter(recorder) -> Callable[[str], None]:
+    """Adapter for FastPath's emit_user_confirmed. Logs USER_CONFIRMED
+    only — never calls ReservationBook.confirm() directly. Per the
+    two-phase design, this package only produces the event; the runtime
+    consults may_confirm (fingerprint + policy + this event) and
+    dispatches confirm_room itself."""
+
+    def _emit(reservation_id: str) -> None:
+        recorder.log(EventType.USER_CONFIRMED, reservation_id=reservation_id)
+
+    return _emit
+
+
 class FastPath:
     def __init__(
         self,
@@ -48,10 +69,9 @@ class FastPath:
         self.answer_clarify = answer_clarify
         self._on_final = on_final
         self.recorder = recorder
-        # B7 — C's ReservationBook doesn't exist yet, so both of these are
-        # injected and default to "nothing pending". Wiring them to the
-        # real reservation book once C2 lands is a one-line swap here, not
-        # a rewrite.
+        # B7 — both injected, defaulting to "nothing pending". Wire the
+        # real thing with pending_reservation_ids(book) and
+        # make_user_confirmed_emitter(recorder), defined below.
         self.get_pending_reservation_ids = get_pending_reservation_ids or (lambda: [])
         self.emit_user_confirmed = emit_user_confirmed or (lambda reservation_id: None)
 
