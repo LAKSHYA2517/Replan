@@ -29,7 +29,9 @@ from replan.commit import CommitGate
 from replan.executor import BudgetGovernor, Executor, SpeculationRefused
 from replan.reconcile import Reconciliation, reconcile
 from replan.recorder import Recorder
-from replan.schemas import EventType, ExecutionPlan, PlanTask, Proposal, SessionState, TaskStatus, Verdict
+from replan.schemas import (
+    EventType, ExecutionPlan, PlanTask, Proposal, SessionState, TaskStatus, ToolResult, Verdict,
+)
 from replan.state import StateStore
 from replan.tools.registry import TOOL_SPECS
 
@@ -199,9 +201,12 @@ class Runtime:
             task.id for task in self.plan.tasks.values()
             if task.status is TaskStatus.RUNNING
         }
+        # Freeze BEFORE checkpointing, not after: a checkpoint taken first
+        # captures a system with results still mid-flight, and resume
+        # behaviour becomes ambiguous (the brief's own ordering warning).
+        self.executor.freeze(self._paused_task_ids, self.plan)
         checkpoint = f"auto-pause-{self.store.current.version}"
         self.checkpoint(checkpoint)
-        self.executor.freeze(self._paused_task_ids, self.plan)
         self.paused = True
         self.recorder.log(
             EventType.PAUSE,
@@ -217,6 +222,17 @@ class Runtime:
         self.paused = False
         self.recorder.log(EventType.RESUME, task_ids=sorted(task_ids))
 
+        # KNOWN LIMITATION, found via testing, not covered by acceptance
+        # test 8 (which never exercises the deferred path): this only
+        # guarantees deferred items run in order RELATIVE TO EACH OTHER.
+        # resume() can't be made async without silently breaking test 8,
+        # which calls it as a bare unawaited statement — so this is a
+        # fire-and-forget task, and a caller that issues new work
+        # immediately after resume() with no intervening await can, in
+        # rare cases, have that new work run first. Fix on the caller side
+        # is one line (yield to the loop once right after calling resume(),
+        # before issuing new work); fixing it here means changing resume()'s
+        # signature, which is the team's call, not mine to make unilaterally.
         deferred, self._deferred = self._deferred, []
         if deferred:
             async def drain_deferred() -> None:
@@ -276,3 +292,102 @@ class Runtime:
             if decision.verdict is Verdict.COMMIT:
                 self._pending_compensations.discard(decision.task_id)
         self.metrics.dangling_effects = len(self._pending_compensations)
+
+
+def _demo_plan(state: SessionState, calls: dict[str, dict]) -> ExecutionPlan:
+    """Minimal plan builder for `make demo` only — turns a scenario's
+    {tool: {args}} declarations into PlanTasks, $ref-ing any arg whose
+    value matches something already in state. Task id == tool name (see
+    the module docstring on why that has to be stable across reconciles).
+    Real scenario-driven planning belongs to whoever owns bench/scenarios.py
+    going forward; bench/run.py already has its own richer version of this.
+    """
+    arg_paths = {
+        "locality": "slots.locality", "member": "slots.member",
+        "budget": "constraints.budget", "breakfast": "constraints.breakfast",
+    }
+    tasks = {}
+    for tool, call in calls.items():
+        arg_spec = {}
+        for key, value in call["args"].items():
+            path = arg_paths.get(key)
+            arg_spec[key] = {"$ref": path} if path and state.read(path) == value else value
+        tasks[tool] = PlanTask(id=tool, tool=tool, arg_spec=arg_spec)
+    return ExecutionPlan(id=f"plan-v{state.version}", tasks=tasks)
+
+
+async def _run_demo() -> None:
+    """make demo: run the signature scenario (hotel_locality_pivot) end to
+    end under REPLAN and print the verdict ledger — a stale late result
+    landing after the pivot must show STALE, not silently commit."""
+    from random import Random
+
+    from bench.scenarios import hotel_locality_pivot
+    from replan.clock import VirtualClock
+    from replan.tools.mocks import make_mock_tool
+
+    clock = VirtualClock()
+    rng = Random(7)
+    tools = {
+        name: make_mock_tool(name, clock, rng, 0.3)
+        for name in ("search_hotels", "loyalty_status")
+    }
+    runtime = Runtime(clock=clock, seed=7, policy=Policy.REPLAN, tools=tools)
+
+    scenario = hotel_locality_pivot(interrupt_offset=1.2)
+    desired = {c["tool"]: c for c in scenario["initial"]["tool_calls"]}
+    runtime.build_plan = lambda state: _demo_plan(state, desired)
+
+    new_state, _ = runtime.on_proposal(Proposal(patch=scenario["initial"]["patch"]))
+    runtime.plan = runtime.build_plan(new_state)
+    for task in runtime.plan.tasks.values():
+        runtime.executor.dispatch(task, runtime.plan)
+
+    late = scenario["late_result"]
+    end_at = late["at"] + 1.0
+    # Capture the fingerprint the late result was ACTUALLY dispatched under
+    # (Bandra), right now, before the interrupt replaces runtime.plan with
+    # the Juhu version — looking it up later from runtime.plan would silently
+    # pick up the NEW fingerprint and this "late, stale" result would
+    # wrongly commit instead of demonstrating the whole point of the demo.
+    original_dispatch_fp = runtime.plan.tasks[late["tool"]].dispatch_fp
+
+    async def inject_late_result() -> None:
+        await clock.sleep(late["at"])
+        runtime.executor.results.put_nowait(
+            ToolResult(
+                call_id="late-demo", task_id=late["tool"], ok=True,
+                payload=dict(late["args"]), dispatch_fp=original_dispatch_fp,
+            )
+        )
+
+    async def interrupt() -> None:
+        await clock.sleep(scenario["interruption"]["at"])
+        desired.update({c["tool"]: c for c in scenario["interruption"]["tool_calls"]})
+        await runtime.apply_proposal_and_dispatch(Proposal(patch=scenario["interruption"]["patch"]))
+
+    async def ticker() -> None:
+        # Drain periodically, the way a real driving loop would — settled
+        # results must land in the gate (and its cache) as they arrive, not
+        # only once at the very end, or reconcile() never gets to see what
+        # already committed and selective reuse never has a chance to show.
+        elapsed = 0.0
+        while elapsed < end_at:
+            await clock.sleep(0.05)
+            elapsed += 0.05
+            runtime.tick()
+
+    tasks = [asyncio.create_task(interrupt()), asyncio.create_task(inject_late_result()), asyncio.create_task(ticker())]
+    await clock.run_until_idle()  # actually advances the virtual clock so the above wake up
+    await asyncio.gather(*tasks)
+    runtime.tick()
+
+    print(f"=== {scenario['name']} — verdict ledger ({len(runtime.gate.ledger)} decisions) ===")
+    for d in runtime.gate.ledger:
+        print(f"  {d.call_id:>12} | {d.verdict.value:>9} | {d.reason}")
+    print(f"final state: {runtime.store.current.slots}")
+    print(f"metrics: {runtime.metrics}")
+
+
+if __name__ == "__main__":
+    asyncio.run(_run_demo())
