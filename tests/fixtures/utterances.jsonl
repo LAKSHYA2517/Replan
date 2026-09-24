@@ -1,0 +1,76 @@
+{"text": "mm-hmm", "label": "BACKCHANNEL"}
+{"text": "mhmm", "label": "BACKCHANNEL"}
+{"text": "uh huh", "label": "BACKCHANNEL"}
+{"text": "yeah", "label": "BACKCHANNEL"}
+{"text": "yep", "label": "BACKCHANNEL"}
+{"text": "ok", "label": "BACKCHANNEL"}
+{"text": "okay", "label": "BACKCHANNEL"}
+{"text": "right", "label": "BACKCHANNEL"}
+{"text": "sure", "label": "BACKCHANNEL"}
+{"text": "hmm", "label": "BACKCHANNEL"}
+{"text": "hmmm", "label": "BACKCHANNEL"}
+{"text": "right.", "label": "BACKCHANNEL"}
+{"text": "forget it", "label": "ABORT"}
+{"text": "cancel everything", "label": "ABORT"}
+{"text": "never mind", "label": "ABORT"}
+{"text": "stop", "label": "ABORT"}
+{"text": "just stop", "label": "ABORT"}
+{"text": "no, forget it, I'll do it later", "label": "ABORT"}
+{"text": "actually never mind about all of this", "label": "ABORT"}
+{"text": "please cancel everything you were doing", "label": "ABORT"}
+{"text": "stop, that's enough", "label": "ABORT"}
+{"text": "yeah just stop for now", "label": "ABORT"}
+{"text": "don't book anything yet", "label": "POLICY"}
+{"text": "don't buy it", "label": "POLICY"}
+{"text": "don't confirm yet", "label": "POLICY"}
+{"text": "just show me the options", "label": "POLICY"}
+{"text": "only show me hotels under budget", "label": "POLICY"}
+{"text": "hold off on booking", "label": "POLICY"}
+{"text": "don't send anything yet", "label": "POLICY"}
+{"text": "don't order it right now", "label": "POLICY"}
+{"text": "just show what's available, don't book", "label": "POLICY"}
+{"text": "hold off for a second", "label": "POLICY"}
+{"text": "what was that again", "label": "CLARIFY"}
+{"text": "say that again please", "label": "CLARIFY"}
+{"text": "can you repeat that", "label": "CLARIFY"}
+{"text": "how much is it", "label": "CLARIFY"}
+{"text": "which one did you say", "label": "CLARIFY"}
+{"text": "sorry what was the price again", "label": "CLARIFY"}
+{"text": "wait, repeat that last part", "label": "CLARIFY"}
+{"text": "how much does it cost", "label": "CLARIFY"}
+{"text": "which one was cheaper", "label": "CLARIFY"}
+{"text": "say that again, I missed it", "label": "CLARIFY"}
+{"text": "actually, make it Juhu instead", "label": "PIVOT"}
+{"text": "actually, change it to next weekend", "label": "PIVOT"}
+{"text": "no wait, make the budget five thousand", "label": "PIVOT"}
+{"text": "scratch that, book it near Bandra instead", "label": "PIVOT"}
+{"text": "instead, let's go with a budget under three thousand", "label": "PIVOT"}
+{"text": "actually change it to Saturday instead of Friday", "label": "PIVOT"}
+{"text": "rather, let's stay near the airport", "label": "PIVOT"}
+{"text": "no wait, I want it with breakfast included", "label": "PIVOT"}
+{"text": "actually make it check-in tomorrow", "label": "PIVOT"}
+{"text": "scratch that, under two thousand rupees please", "label": "PIVOT"}
+{"text": "instead, let's do this on the weekend", "label": "PIVOT"}
+{"text": "actually, change it to a place near the station", "label": "PIVOT"}
+{"text": "actually", "label": "REFINE"}
+{"text": "instead", "label": "REFINE"}
+{"text": "no wait", "label": "REFINE"}
+{"text": "scratch that", "label": "REFINE"}
+{"text": "rather", "label": "REFINE"}
+{"text": "actually hold on", "label": "REFINE"}
+{"text": "instead let me think", "label": "REFINE"}
+{"text": "no wait give me a second", "label": "REFINE"}
+{"text": "scratch that, let me reconsider", "label": "REFINE"}
+{"text": "rather, hmm", "label": "REFINE"}
+{"text": "yes, book it", "label": "CONFIRM"}
+{"text": "go ahead", "label": "CONFIRM"}
+{"text": "confirm", "label": "CONFIRM"}
+{"text": "do it", "label": "CONFIRM"}
+{"text": "that one", "label": "CONFIRM"}
+{"text": "yes go ahead and confirm it", "label": "CONFIRM"}
+{"text": "I'm looking for a hotel for this weekend", "label": "NONE"}
+{"text": "the weather looks nice today", "label": "NONE"}
+{"text": "tell me a joke", "label": "NONE"}
+{"text": "book it for two people", "label": "NONE"}
+{"text": "sounds good to me", "label": "NONE"}
+{"text": "great, thank you", "label": "NONE"}

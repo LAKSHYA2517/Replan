@@ -16,15 +16,34 @@ import json
 import re
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 from dateutil import parser as dateparser
 
-from replan.schemas import Proposal, SessionState
+from replan.schemas import EventType, ExecutionPlan, Proposal, SessionState, Verdict
 
 ALLOWED_SECTIONS = frozenset(f for f in SessionState.model_fields if f != "version")
 
 LLMCallFn = Callable[[str], Awaitable[str]]
+
+
+class _EventLike(Protocol):
+    type: EventType
+    payload: dict[str, Any]
+
+
+class _RecorderLike(Protocol):
+    events: list[_EventLike]
+
+
+class _DecisionLike(Protocol):
+    task_id: str
+    verdict: Verdict
+    reason: str
+
+
+class _GateLike(Protocol):
+    ledger: list[_DecisionLike]
 
 
 class CacheMiss(RuntimeError):
@@ -198,3 +217,97 @@ def rule_based_proposal(transcript: str, state: SessionState) -> Proposal:
         return Proposal(kind="state_patch", patch=patch, rationale="rule-based extraction", confidence=0.5)
     except Exception:
         return Proposal(kind="state_patch", patch={}, rationale="rule-based extraction failed", confidence=0.0)
+
+
+def _assemble_why_facts(
+    recorder: _RecorderLike,
+    gate: _GateLike,
+    state: SessionState,
+    plan: ExecutionPlan | None,
+) -> dict[str, Any]:
+    """Walks the event log backward to find the state version each
+    currently-active slot/constraint was last set at, then pairs that
+    with the gate's ledger (committed vs rejected results). Everything
+    here is a read of recorded facts — nothing is inferred or generated.
+    """
+    last_set_version: dict[str, int] = {}
+    for event in reversed(recorder.events):
+        if event.type == EventType.STATE_PATCH:
+            version = event.payload.get("version")
+            for path in event.payload.get("changed_paths", []):
+                if path not in last_set_version and version is not None:
+                    last_set_version[path] = version
+
+    active_constraints = [
+        {"path": f"slots.{key}", "value": value, "set_at_version": last_set_version.get(f"slots.{key}")}
+        for key, value in state.slots.items()
+    ] + [
+        {"path": f"constraints.{key}", "value": value, "set_at_version": last_set_version.get(f"constraints.{key}")}
+        for key, value in state.constraints.items()
+    ]
+
+    committed: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    for decision in gate.ledger:
+        entry: dict[str, Any] = {"task_id": decision.task_id, "verdict": decision.verdict.value, "reason": decision.reason}
+        if plan is not None and decision.task_id in plan.tasks:
+            entry["tool"] = plan.tasks[decision.task_id].tool
+        (committed if decision.verdict == Verdict.COMMIT else rejected).append(entry)
+
+    return {"active_constraints": active_constraints, "committed": committed, "rejected": rejected}
+
+
+def _render_facts_plainly(facts: dict[str, Any]) -> str:
+    parts: list[str] = []
+    if facts["active_constraints"]:
+        bits = [
+            f"{c['path']}={c['value']!r} (set at v{c['set_at_version']})"
+            for c in facts["active_constraints"]
+            if c["set_at_version"] is not None
+        ]
+        if bits:
+            parts.append("Currently in force: " + ", ".join(bits) + ".")
+    if facts["committed"]:
+        parts.append(f"{len(facts['committed'])} result(s) committed.")
+    if facts["rejected"]:
+        reasons = "; ".join(r["reason"] for r in facts["rejected"])
+        parts.append(f"{len(facts['rejected'])} result(s) discarded: {reasons}.")
+    return " ".join(parts) if parts else "Nothing has been decided in this session yet."
+
+
+async def explain(
+    recorder: _RecorderLike,
+    gate: _GateLike,
+    state: SessionState,
+    plan: ExecutionPlan | None = None,
+    llm: LLMCallFn | None = None,
+) -> str:
+    """Answers "why are you showing me this?" by walking the event log
+    and the commit ledger and rendering only recorded facts — never
+    generated. If `llm` is given, it may smooth the phrasing of the
+    fully-determined fact list into natural spoken sentences, but it is
+    handed a finished fact list to phrase, not asked to reason about
+    what happened — it cannot add, drop, or alter a fact. Falls back to
+    the plain rendering on any LLM failure, never raises.
+    """
+    facts = _assemble_why_facts(recorder, gate, state, plan)
+    plain = _render_facts_plainly(facts)
+    if llm is None:
+        return plain
+
+    prompt = json.dumps(
+        {
+            "instruction": (
+                "Rephrase the following facts as 2-3 natural spoken sentences. "
+                "Do not add, remove, or change any fact, name, or number — "
+                "phrasing only."
+            ),
+            "facts": facts,
+        },
+        sort_keys=True,
+    )
+    try:
+        phrased = await llm(prompt)
+        return phrased.strip() or plain
+    except Exception:
+        return plain

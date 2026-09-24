@@ -214,6 +214,30 @@ class FreellmapiSpeechAgent(SpeechAgent):
 
         return _call
 
+    def plain_chat_backend(self) -> Callable[[str], Awaitable[str]]:
+        """Same as json_chat_backend but no response_format constraint —
+        for callers that want prose back (e.g. proposals.explain's
+        phrasing pass), not a JSON object."""
+
+        async def _call(prompt: str) -> str:
+            resp = await self._client.post(
+                "/chat/completions",
+                json={
+                    "model": self.config.chat_model,
+                    "temperature": 0,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+            )
+            if resp.status_code != 200:
+                raise FreellmapiError(f"chat completion failed {resp.status_code}: {resp.text[:300]}")
+            body = resp.json()
+            try:
+                return body["choices"][0]["message"]["content"]
+            except (KeyError, IndexError) as exc:
+                raise FreellmapiError(f"unexpected chat completion response shape: {body}") from exc
+
+        return _call
+
     async def compose_response(self, committed_results: list[dict], state: SessionState) -> str:
         """Turn the commit gate's accepted results into 1-2 spoken sentences.
 
