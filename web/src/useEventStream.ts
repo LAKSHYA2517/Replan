@@ -331,6 +331,16 @@ export function useEventStream(initialMode: 'fixture' | 'live' = 'fixture') {
   // Derive pure state from processed events
   const state: UIState = events.reduce(eventReducer, initialUIState);
 
+  // Clear accumulated events whenever the data source changes. Fixture and
+  // live events each independently start their own seq numbering at 1, so
+  // without this, leftover events from the previous mode collide as
+  // duplicate React keys and desync every derived panel (timeline,
+  // dual-pane, verdict ledger) with a mix of two unrelated event streams.
+  useEffect(() => {
+    setEvents([]);
+    setCursor(0);
+  }, [mode]);
+
   // Playback timer for fixture
   useEffect(() => {
     if (mode !== 'fixture' || !isPlaying) return;
@@ -425,10 +435,12 @@ export function useEventStream(initialMode: 'fixture' | 'live' = 'fixture') {
 
   const injectLateResult = useCallback(async () => {
     if (mode === 'live') {
-      try {
-        await fetch('http://localhost:8000/inject_late_result', { method: 'POST' });
-      } catch (err) {
-        console.error('Failed to inject late result to live server:', err);
+      // server.py only ever implemented this as a WebSocket message, not an
+      // HTTP route -- send it the way the backend actually listens for it.
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'inject_late_result' }));
+      } else {
+        console.error('Cannot inject late result: live WebSocket is not connected.');
       }
     } else {
       // In fixture mode, inject a late synthetic STALE verdict event

@@ -15,8 +15,23 @@ from collections.abc import Awaitable
 
 
 class RealClock:
+    """now() is elapsed time since this clock's first use, not the raw
+    event-loop monotonic value (which is an arbitrary, often huge, number —
+    e.g. seconds since something unrelated like system boot). VirtualClock
+    always starts at 0.0; RealClock must match that semantics to be a fair
+    drop-in replacement, and anything downstream that renders `t` as if it
+    were "seconds since this scenario started" (every Event.t consumer)
+    depends on it.
+    """
+
+    def __init__(self) -> None:
+        self._start: float | None = None
+
     def now(self) -> float:
-        return asyncio.get_event_loop().time()
+        loop_now = asyncio.get_event_loop().time()
+        if self._start is None:
+            self._start = loop_now
+        return loop_now - self._start
 
     def sleep(self, delay: float) -> Awaitable[None]:
         return asyncio.sleep(delay)

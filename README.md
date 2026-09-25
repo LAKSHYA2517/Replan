@@ -28,14 +28,30 @@ RePlan runs 100% deterministically out-of-the-box using recorded response caches
 git clone https://github.com/LAKSHYA2517/Replan.git
 cd Replan
 
-# 2. Verify repository integrity and banned patterns (CI check)
+# 2. Set up the Python environment (3.11+) and install pinned dependencies
+python3 --version   # if this prints below 3.10, use python3.11 (or 3.12/3.13) instead
+                     # of python3 below — many machines' plain `python3` is an old
+                     # system interpreter with a pip too old for this project
+python3.11 -m venv .venv || python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install --upgrade pip
+pip install -e ".[dev]"
+
+# 3. Verify repository integrity and banned patterns (CI check)
 make check
 
-# 3. Start the Web Execution Console (Role D)
+# 4. Run the backend: acceptance tests, the signature scenario, and replay verification
+make test
+make demo
+make replay
+
+# 5. Start the Web Execution Console (Role D)
 cd web
 npm install
 npm run dev
 ```
+
+`make demo` runs the signature scenario end to end under `REPLAN_LLM_MODE=replay` (the default) — no API key, no network call, fully deterministic — and prints the verdict ledger, including the stale late result correctly rejected. `make replay` re-runs that same scenario under a different seed and confirms the resulting state chain hash matches bit-for-bit.
 
 Open your browser at `http://localhost:5173` to explore the **Dual-Pane Showdown**, **Execution Timeline**, and **3-Column Console**. Click the big red **"⚡ Inject Late Result"** button to watch the runtime defend itself against out-of-order race conditions in real time!
 
@@ -83,8 +99,8 @@ WEB CONSOLE & DUAL-PANE SHOWDOWN
 
 ## 5. What to Look at First (Judge's Guide)
 
-1. **The Commit Gate ([`replan/commit.py`](file:///c:/Users/mehta/OneDrive/Desktop/Replan/replan/commit.py)):** The heart of the project. Under 60 lines of code. Proves why an arriving result is only committed if `dispatch_fp == current_fp`.
-2. **The Shared Contract Pack ([`replan/schemas.py`](file:///c:/Users/mehta/OneDrive/Desktop/Replan/replan/schemas.py) & [`web/src/contract.ts`](file:///c:/Users/mehta/OneDrive/Desktop/Replan/web/src/contract.ts)):** Strict Pydantic v2 and TypeScript type definitions frozen at Hour Zero.
-3. **The Dual-Pane Console ([`web/src/views/DualPane.tsx`](file:///c:/Users/mehta/OneDrive/Desktop/Replan/web/src/views/DualPane.tsx)):** Live side-by-side comparison proving conventional agents suffer state corruption (`WRONG ACTIONS: 1`) while RePlan guarantees `WRONG ACTIONS: 0`.
-4. **The Acceptance Test Suite ([`tests/test_acceptance.py`](file:///c:/Users/mehta/OneDrive/Desktop/Replan/tests/)):** 20 independent contract-driven acceptance tests.
-5. **The 5-Minute Video Storyboard ([`docs/DEMO_SCRIPT.md`](file:///c:/Users/mehta/OneDrive/Desktop/Replan/docs/DEMO_SCRIPT.md)):** Word-for-word timed demonstration narrative.
+1. **The Commit Gate ([`replan/commit.py`](replan/commit.py)):** The heart of the project. Under 60 lines of code. Proves why an arriving result is only committed if `dispatch_fp == current_fp`.
+2. **The Shared Contract Pack ([`replan/schemas.py`](replan/schemas.py) & [`web/src/contract.ts`](web/src/contract.ts)):** Strict Pydantic v2 and TypeScript type definitions frozen at Hour Zero.
+3. **The Dual-Pane Console ([`web/src/views/DualPane.tsx`](web/src/views/DualPane.tsx)):** Live side-by-side comparison proving conventional agents suffer state corruption (`WRONG ACTIONS: 1`) while RePlan guarantees `WRONG ACTIONS: 0`.
+4. **The Acceptance Test Suite ([`tests/test_acceptance.py`](tests/test_acceptance.py)):** 20 independent contract-driven acceptance tests.
+5. **The 5-Minute Video Storyboard ([`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md)):** Word-for-word timed demonstration narrative.

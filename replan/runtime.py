@@ -167,7 +167,18 @@ class Runtime:
         # let every just-dispatched asyncio.Task actually run (a freshly
         # created task hasn't executed a single line yet — only scheduled)
         # before we drain, or this turn's results simply aren't there yet.
-        await self.clock.run_until_idle()
+        # run_until_idle() is VirtualClock-only (not part of the shared
+        # now()/sleep() clock interface A1 defined) -- every proof of this
+        # method before now used VirtualClock, so RealClock breaking here
+        # went uncaught until a live server actually exercised it. For a
+        # real clock there's nothing to pump to completion synchronously;
+        # one yield is enough to let same-tick-fast tools land, and genuine
+        # real-latency settlement is the caller's own ongoing tick() loop
+        # to catch (see server.py's _run_scenario).
+        if hasattr(self.clock, "run_until_idle"):
+            await self.clock.run_until_idle()
+        else:
+            await self.clock.sleep(0)  # never asyncio.sleep directly outside clock.py
         verdicts = self.tick()
         return verdicts
 
