@@ -119,3 +119,44 @@ def _shift_interruptions(trace: list[Event], shift_interrupt: float) -> list[Eve
 
 def replay_counterfactual(trace: list[Event], seed: int, shift_interrupt: float):
     return replay(_shift_interruptions(trace, shift_interrupt), seed)
+
+
+async def _record_signature_trace() -> list[Event]:
+    """Drive the same signature scenario runtime.py's __main__ uses, purely
+    to produce a trace for make replay to verify — no assertions here,
+    that's tick()/gate's job during the live run."""
+    from random import Random
+
+    from bench.scenarios import hotel_locality_pivot
+    from replan.runtime import Policy, Runtime, _demo_plan
+    from replan.tools.mocks import make_mock_tool
+
+    clock = VirtualClock()
+    rng = Random(7)
+    tools = {name: make_mock_tool(name, clock, rng, 0.3) for name in ("search_hotels", "loyalty_status")}
+    runtime = Runtime(clock=clock, seed=7, policy=Policy.REPLAN, tools=tools)
+
+    scenario = hotel_locality_pivot(interrupt_offset=1.2)
+    desired = {c["tool"]: c for c in scenario["initial"]["tool_calls"]}
+    runtime.build_plan = lambda state: _demo_plan(state, desired)
+
+    new_state, _ = runtime.on_proposal(Proposal(patch=scenario["initial"]["patch"]))
+    runtime.plan = runtime.build_plan(new_state)
+    for task in runtime.plan.tasks.values():
+        runtime.executor.dispatch(task, runtime.plan)
+    await clock.run_until_idle()
+    runtime.tick()
+    await runtime.apply_proposal_and_dispatch(Proposal(patch=scenario["interruption"]["patch"]))
+    return list(runtime.recorder.events)
+
+
+def _main() -> None:
+    trace = asyncio.run(_record_signature_trace())
+    ok = verify(trace, seed=999)  # different seed on purpose: replay is driven by the trace, not the seed
+    print(f"recorded {len(trace)} events; replay under a different seed reproduces the chain hash: {ok}")
+    if not ok:
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    _main()
