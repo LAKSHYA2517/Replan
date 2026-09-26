@@ -35,6 +35,7 @@ _ARG_PATHS = {
     "hotel": "slots.hotel",
     "room": "slots.room",
     "name": "slots.appliance",
+    "destination": "slots.destination",
     "budget": "constraints.budget",
     "breakfast": "constraints.breakfast",
     "degrees": "constraints.temperature",

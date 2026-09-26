@@ -42,8 +42,8 @@ def bench_temp(request):
     shutil.rmtree(path, ignore_errors=True)
 
 
-def test_four_scenarios_have_configurable_late_results():
-    assert len(SCENARIOS) == 4
+def test_scenarios_have_configurable_late_results():
+    assert len(SCENARIOS) == 5
     for build in SCENARIOS.values():
         scenario = build(0.6)
         assert scenario["interruption"]["at"] == 0.6
