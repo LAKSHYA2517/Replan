@@ -1,6 +1,38 @@
 """Deterministic benchmark scenario definitions."""
 
 
+def incar_destination_pivot(interrupt_offset: float) -> dict:
+    """Change destination while an old destination result is still in flight."""
+    if interrupt_offset < 0:
+        raise ValueError("interrupt_offset must be non-negative")
+    return {
+        "name": "incar_destination_pivot",
+        "initial": {
+            "at": 0.0,
+            "utterance": "Set my destination to Mumbai Airport and start navigation.",
+            "patch": {"slots": {"destination": "Mumbai Airport"}},
+            "tool_calls": [
+                {"tool": "set_destination", "args": {"destination": "Mumbai Airport"}},
+                {"tool": "start_navigation", "args": {"destination": "Mumbai Airport"}},
+            ],
+        },
+        "interruption": {
+            "at": interrupt_offset,
+            "utterance": "Actually, take me to Bandra Station instead.",
+            "patch": {"slots": {"destination": "Bandra Station"}},
+            "tool_calls": [
+                {"tool": "set_destination", "args": {"destination": "Bandra Station"}},
+                {"tool": "start_navigation", "args": {"destination": "Bandra Station"}},
+            ],
+        },
+        "late_result": {
+            "at": interrupt_offset + 0.5,
+            "tool": "set_destination",
+            "args": {"destination": "Mumbai Airport"},
+        },
+    }
+
+
 def smarthome_pivot(interrupt_offset: float) -> dict:
     """Build the smart-home pivot with a deliberately late stale result."""
     if interrupt_offset < 0:
@@ -157,4 +189,5 @@ SCENARIOS = {
     "hotel_budget_refine": hotel_budget_refine,
     "booking_policy_pivot": booking_policy_pivot,
     "smarthome_pivot": smarthome_pivot,
+    "incar_destination_pivot": incar_destination_pivot,
 }
