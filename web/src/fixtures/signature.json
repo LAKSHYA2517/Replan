@@ -10,7 +10,8 @@
         "constraints": { "budget": 5000 },
         "policy": { "booking_enabled": true }
       },
-      "changed_paths": ["slots.locality", "slots.dates", "slots.breakfast", "constraints.budget", "policy.booking_enabled"]
+      "changed_paths": ["slots.locality", "slots.dates", "slots.breakfast", "constraints.budget", "policy.booking_enabled"],
+      "utterance": "Find me a hotel in Delhi this weekend under 5,000 rupees with breakfast."
     },
     "prev_hash": "0000000000000000",
     "hash": "1a2b3c4d5e6f7a8b"
@@ -91,6 +92,7 @@
     "payload": {
       "call_id": "c_loyalty_3",
       "task_id": "task_loyalty",
+      "agent": "replan",
       "verdict": "commit",
       "reason": "dispatch fp fp_loyalty_v1 == current fp (v1)",
       "result": { "status": "gold", "discount_pct": 10 }
@@ -106,6 +108,7 @@
     "payload": {
       "call_id": "c_policy_4",
       "task_id": "task_policy",
+      "agent": "replan",
       "verdict": "commit",
       "reason": "dispatch fp fp_policy_v1 == current fp (v1)",
       "result": { "free_cancellation": true, "tax_pct": 12 }
@@ -262,8 +265,10 @@
     "payload": {
       "call_id": "c_delhi_search_1",
       "task_id": "task_delhi_search",
+      "agent": "replan",
       "verdict": "stale",
       "reason": "dispatch fp fp_delhi_search_v1 != current fp_mumbai_search_v2 (dispatched at v1, now v2)",
+      "baseline_case_study_wrong_actions": 1,
       "dispatched_at_v": 1,
       "current_v": 2
     },
@@ -278,6 +283,7 @@
     "payload": {
       "call_id": "c_delhi_search_1",
       "task_id": "task_delhi_search",
+      "agent": "replan",
       "verdict": "duplicate",
       "reason": "call_id c_delhi_search_1 already adjudicated"
     },
@@ -292,6 +298,7 @@
     "payload": {
       "call_id": "c_mumbai_search_6",
       "task_id": "task_mumbai_search",
+      "agent": "replan",
       "verdict": "commit",
       "reason": "dispatch fp fp_mumbai_search_v2 == current fp (v2)",
       "result": {
@@ -312,6 +319,7 @@
     "payload": {
       "call_id": "c_mumbai_avail_7",
       "task_id": "task_mumbai_avail",
+      "agent": "replan",
       "verdict": "commit",
       "reason": "dispatch fp fp_mumbai_avail_v2 == current fp (v2)",
       "result": { "available": true, "rooms_left": 3 }
