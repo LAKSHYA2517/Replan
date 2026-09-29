@@ -76,13 +76,23 @@ class Metrics:
 
 class Runtime:
     def __init__(self, clock, seed: int, policy: Policy, tools: dict,
-                 llm=None, chaos: str = "none", recorder=None) -> None:
+                 llm=None, chaos: str = "none", recorder=None, scenario_id: str | None = None) -> None:
         self.clock = clock
         self.policy = policy
         self.rng = random.Random(seed)
         self.llm = llm
         self.chaos = chaos  # stub: real chaos-wrapping needs C5 (replan/tools/chaos.py), not built yet
+        self.scenario_id = scenario_id
 
+        # A10: everything else here is already fresh by construction on
+        # every call (fresh StateStore, fresh CommitGate with an empty
+        # cache, fresh rng, fresh clock/recorder) -- the one real
+        # cross-scenario leak vector is the LLM response cache below,
+        # which without scenario_id defaults to one shared file read via a
+        # process-global env var. A prompt that happens to be byte-identical
+        # across two different scenarios (e.g. both scenarios' first turn,
+        # before any state has diverged) would otherwise silently replay a
+        # DIFFERENT scenario's cached response.
         self.store = StateStore(SessionState())
         self.recorder = recorder if recorder is not None else Recorder(clock, self.store)
         self.gate = CommitGate(self.store, self.recorder)
@@ -91,6 +101,13 @@ class Runtime:
         self.freeze_controller = FreezeController(self.executor) if FreezeController is not None else None
 
         cache_path = Path(os.environ.get("REPLAN_LLM_CACHE", "tests/fixtures/llm_cache.json"))
+        if scenario_id is not None:
+            # A separate file per scenario id, not a scenario-id-qualified
+            # key inside one shared file: this way there is no shared
+            # namespace to leak through even if LLMCache's own key scheme
+            # (sha256(prompt) alone, in replan/agents/proposals.py, B's
+            # file — not touched here) never learns about scenario ids.
+            cache_path = cache_path.with_name(f"{cache_path.stem}.{scenario_id}{cache_path.suffix}")
         cache_mode = os.environ.get("REPLAN_LLM_MODE", "replay")
         self._llm_cache = LLMCache(cache_path, cache_mode)
 

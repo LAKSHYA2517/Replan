@@ -28,18 +28,25 @@ from replan.runtime import Policy, Runtime
 from replan.schemas import Proposal, Verdict
 
 
-def build_scenario_runtime(tools: dict, *, policy: Policy = Policy.REPLAN, seed: int | None = None) -> Runtime:
-    """Construct a FRESH Runtime for one scenario. Call this at the start
-    of every scenario boundary, never once per process/job and reused
-    across scenarios — that's A10's cross-scenario guarantee. It's easy to
-    honour correctly by construction: Runtime.__init__ already builds a
-    fresh StateStore, CommitGate cache, clock and recorder every time it
-    runs, so a fresh call here is a fresh everything — there's nothing to
-    separately reset.
+def build_scenario_runtime(
+    tools: dict, *, policy: Policy = Policy.REPLAN, seed: int | None = None, scenario_id: str | None = None
+) -> Runtime:
+    """THE scenario-boundary hook (A10): construct a FRESH Runtime for one
+    scenario. Call this at the start of EVERY scenario — never once per
+    LiveKit job/process and reused across two different scenario ids, even
+    if the harness reuses one room or process for the whole sweep.
+
+    Pass scenario_id whenever one is known (the FDB-v3 scenario/example
+    id). Runtime.__init__ already builds a fresh StateStore, CommitGate
+    cache, rng, clock and recorder every call — re-instantiating here is
+    enough for all of those, nothing to separately reset. The one thing
+    that needs scenario_id explicitly is the LLM response cache, which
+    without it would default to one file shared across every scenario in
+    the process; see the comment in runtime.py.
     """
     if seed is None:
         seed = random.SystemRandom().randrange(2**31)
-    return Runtime(clock=RealClock(), seed=seed, policy=policy, tools=tools)
+    return Runtime(clock=RealClock(), seed=seed, policy=policy, tools=tools, scenario_id=scenario_id)
 
 
 def route_partial_transcript(runtime: Runtime, text: str) -> None:
