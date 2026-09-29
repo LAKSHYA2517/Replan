@@ -68,6 +68,25 @@
 {"text": "do it", "label": "CONFIRM"}
 {"text": "that one", "label": "CONFIRM"}
 {"text": "yes go ahead and confirm it", "label": "CONFIRM"}
+{"text": "actually, go to Bandra Station instead", "label": "PIVOT"}
+{"text": "actually take me to the airport instead", "label": "PIVOT"}
+{"text": "no wait, navigate to Andheri", "label": "PIVOT"}
+{"text": "change the destination to Colaba", "label": "PIVOT"}
+{"text": "instead, head to the railway station", "label": "PIVOT"}
+{"text": "scratch that, go to my office instead", "label": "PIVOT"}
+{"text": "actually, pick me up at the mall first", "label": "PIVOT"}
+{"text": "no, pick up Priya first", "label": "PIVOT"}
+{"text": "rather, drive to the hospital", "label": "PIVOT"}
+{"text": "actually, navigate to the station instead", "label": "PIVOT"}
+{"text": "no wait, take me to Andheri station instead", "label": "PIVOT"}
+{"text": "instead, go to the hospital first", "label": "PIVOT"}
+{"text": "actually, make it the mall instead", "label": "PIVOT"}
+{"text": "actually, take the highway instead", "label": "REFINE"}
+{"text": "actually, change the route", "label": "REFINE"}
+{"text": "instead, let's go there later", "label": "REFINE"}
+{"text": "no wait, cancel the navigation", "label": "REFINE"}
+{"text": "how much longer to the destination", "label": "CLARIFY"}
+{"text": "what was the destination again", "label": "CLARIFY"}
 {"text": "I'm looking for a hotel for this weekend", "label": "NONE"}
 {"text": "the weather looks nice today", "label": "NONE"}
 {"text": "tell me a joke", "label": "NONE"}
