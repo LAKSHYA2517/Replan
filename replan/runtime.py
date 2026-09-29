@@ -18,6 +18,7 @@ the accompanying summary rather than silently invented:
 from __future__ import annotations
 
 import asyncio
+import itertools
 import os
 import random
 from dataclasses import dataclass
@@ -94,6 +95,7 @@ class Runtime:
         self._llm_cache = LLMCache(cache_path, cache_mode)
 
         self.plan = ExecutionPlan(id="plan-v0", tasks={})
+        self._task_seq = itertools.count()  # for dispatch_new_task's auto ids
         self.paused = False
         self._deferred: list[tuple[str, str]] = []  # (method, text), queued while paused
         self._paused_task_ids: set[str] = set()
@@ -181,6 +183,29 @@ class Runtime:
             await self.clock.sleep(0)  # never asyncio.sleep directly outside clock.py
         verdicts = self.tick()
         return verdicts
+
+    def dispatch_new_task(self, tool: str, arg_spec: dict, *, speculative: bool = False) -> str | None:
+        """Register a new PlanTask against the current plan and dispatch it
+        immediately, returning its task id. For tool-calling surfaces
+        (LiveKit's function_tool, etc.) where a model-requested call must
+        become its own dispatch through Executor/CommitGate, one call at a
+        time, rather than through the build_plan/reconcile pipeline
+        on_final drives for a whole new plan at once. The model never
+        decides validity either way — this only ever calls
+        executor.dispatch(), which still enforces fingerprinting and
+        speculation-safety exactly like every other dispatch path.
+
+        Task ids use a monotonic counter, not len(self.plan.tasks) (which
+        can shrink if a task is ever removed and collide on reuse) — B9's
+        own agent.py flagged this exact risk and worked around it with its
+        own external counter; formalized here so every caller gets it for
+        free instead of reimplementing it.
+        """
+        task_id = f"{tool}-{next(self._task_seq)}"
+        task = PlanTask(id=task_id, tool=tool, arg_spec=arg_spec, speculative=speculative)
+        self.plan.tasks[task_id] = task
+        self.executor.dispatch(task, self.plan)
+        return task_id
 
     def _apply_patch(self, proposal: Proposal) -> tuple[SessionState, set[str]]:
         new_state, changed_paths = self.store.apply(proposal.patch)
