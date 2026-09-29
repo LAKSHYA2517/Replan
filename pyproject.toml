@@ -15,6 +15,7 @@ dependencies = [
     "python-dotenv==1.0.1",
     "python-dateutil==2.9.0.post0",
     "matplotlib==3.9.2",
+    "livekit-agents[openai,silero]==1.8.3",
 ]
 
 [project.optional-dependencies]
