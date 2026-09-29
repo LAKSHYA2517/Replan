@@ -47,6 +47,30 @@ def route_partial_transcript(runtime: Runtime, text: str) -> None:
     runtime.on_partial(text)
 
 
+async def route_final_transcript(runtime: Runtime, text: str) -> list[Verdict]:
+    """On a final transcript / end-of-turn event — the literal brief line.
+    Not currently called by agent.py: B9's tool-calling-first design routes
+    self-correction through route_tool_call_via_state instead (sufficient
+    for FDB-v3's per-tool-call domain, and already proven live), so the
+    full extract_proposal -> build_plan -> reconcile path this drives
+    currently goes unused there. Provided so any integration that does
+    want it — including the original hotel/extension scenarios, which
+    still rely on it — has it available without reimplementing the call.
+    """
+    return await runtime.on_final(text)
+
+
+def on_turn_complete(runtime: Runtime) -> list[Verdict]:
+    """Call this from LiveKit's own turn-completion event instead of
+    settle_loop's timer, once the chosen template exposes one — the
+    literal "tick() on LiveKit's own turn cadence" the brief asks for.
+    Not currently wired by agent.py, which uses settle_loop's polling
+    fallback below instead; this is the primitive to switch to the moment
+    a real turn-boundary event is available to call it from.
+    """
+    return runtime.tick()
+
+
 def route_tool_call_via_state(runtime: Runtime, tool: str, args: dict, *, speculative: bool = False) -> str | None:
     """The one path a tool-calling surface should use to turn a
     model-requested call into a dispatch: write its args into SessionState
