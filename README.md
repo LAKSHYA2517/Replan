@@ -148,7 +148,21 @@ Full reports: `gemini2_5_evaluation_report.json`, `gemini2_5_pass_rate_report.js
 
 ---
 
-## 5. Proving the Fix Live (Not a Canned Demo)
+## 5. Future Work — Raising the Benchmark Score
+
+These numbers were produced by the raw FDB-v3 stock template (§4), not by RePlan itself — the highest-leverage next step is closing that gap directly, then addressing what the numbers actually show is broken:
+
+1. **Wire `agent.py` (the RePlan-integrated agent) into the FDB-v3 harness itself**, instead of `lk_agent_tool.py`. This is the single biggest gap: right now we've only proven the commit-gate mechanism works in isolation (§6) and confirmed the baseline problem is real (§4) — we haven't yet run the *actual fingerprint-gated agent* through the same 100-example sweep to get a paired before/after score on the self-correction and rollback categories specifically.
+2. **Target argument accuracy, not tool selection.** The data says tool selection is already strong (85.4%) but argument extraction is the dominant failure (50.5%) — that's a proposal-layer problem, not a commit-gate problem. A structured slot-confidence check before dispatch (reusing the existing `Proposal`/`Hypothesis` machinery to trigger a clarifying question on a low-confidence argument instead of guessing and dispatching) would target this directly, and it's the fix most likely to move the overall pass rate, since almost every failure bucket is argument-driven.
+3. **Investigate the domain gap** (98.9% ecommerce vs. 49.4% housing tool-selection accuracy) before trusting it as a real finding — first confirm it isn't an artifact of stricter argument-matching in that domain's scenarios, then if real, add domain-specific few-shot calibration to the proposal layer.
+4. **Separate RePlan's own overhead from ASR/network latency in reporting.** The measured 12.39s avg latency is CPU-bound ASR plus a cross-region network round trip — none of it is RePlan's cost. Publishing the actual dispatch-to-commit latency inside the runtime (which the fast-path budgets already target at T0 < 50ms, T1 < 150ms) alongside the end-to-end number would make the "our overhead is negligible" case explicit instead of implicit.
+5. **Run a true paired naive-vs-RePlan comparison across all 100 examples**, not just the one illustrative signature scenario the web console currently shows — dispatch both `lk_agent_tool.py` and `agent.py` against every example and report matched wrong-action counts, rather than relying on the single `baseline_case_study_wrong_actions` fixture value.
+6. **Complete the two evaluation dimensions currently skipped for lack of a paid key** — `--use-llm` (Response Quality) and `analyze_tool_latency.py`'s third metric both need `OPENAI_API_KEY`; getting one (or substituting a free judge model) would complete the scoring picture rather than leaving two dimensions blank.
+7. **Benchmark beyond one model.** Only `gemini2_5` was run, due to free-tier availability — testing `grok`, `gemini3_1`, and `ultravox` would show whether the self-correction gap is universal across models (strengthening the "this is an architecture problem, not a model problem" claim) or specific to this one.
+
+---
+
+## 6. Proving the Fix Live (Not a Canned Demo)
 
 ```bash
 # pick a destination with no advance knowledge of the outcome
@@ -170,7 +184,7 @@ The first fingerprint is identical on every run (deterministic hash of the same 
 
 ---
 
-## 6. Quickstart (Zero API Key Required for the Core Runtime)
+## 7. Quickstart (Zero API Key Required for the Core Runtime)
 
 ### Prerequisites
 * Python 3.11+
@@ -214,7 +228,7 @@ python evaluate_pass_rate.py --provider gemini2_5 --output report.json
 
 ---
 
-## 7. Makefile Targets
+## 8. Makefile Targets
 
 | Target | Command | Purpose |
 |---|---|---|
@@ -226,10 +240,10 @@ python evaluate_pass_rate.py --provider gemini2_5 --output report.json
 
 ---
 
-## 8. Judge's Guide — What to Look At First
+## 9. Judge's Guide — What to Look At First
 
 1. **The commit gate** ([`replan/commit.py`](replan/commit.py)) — the entire architectural claim, under 60 lines: a result commits only if `dispatch_fp == fingerprint(task, current_state)`.
-2. **The LiveKit adapter** ([`replan/livekit_agent.py`](replan/livekit_agent.py)) — `build_scenario_runtime`, `route_tool_call_via_state`, and the live self-correction demo at the bottom (§5 above).
+2. **The LiveKit adapter** ([`replan/livekit_agent.py`](replan/livekit_agent.py)) — `build_scenario_runtime`, `route_tool_call_via_state`, and the live self-correction demo at the bottom (§6 above).
 3. **The FDB-v3 tool contract** ([`replan/tools/fdb_contract.py`](replan/tools/fdb_contract.py)) — thin wrappers calling FDB-v3's *actual* mock functions directly, proven byte-identical to the upstream benchmark repo.
 4. **The causal execution graph** ([`web/src/views/CausalGraph.tsx`](web/src/views/CausalGraph.tsx)) — click any action node for the real inspector panel (fingerprint, state version, rejection reason).
 5. **The frozen contract pack** ([`replan/schemas.py`](replan/schemas.py) & [`web/src/contract.ts`](web/src/contract.ts)) — shared types between Python and TypeScript, frozen at Hour Zero.
@@ -238,7 +252,7 @@ python evaluate_pass_rate.py --provider gemini2_5 --output report.json
 
 ---
 
-## 9. Submission Materials
+## 10. Submission Materials
 
 | Item | Link |
 |---|---|
@@ -252,7 +266,7 @@ python evaluate_pass_rate.py --provider gemini2_5 --output report.json
 
 ---
 
-## 10. Repository Map
+## 11. Repository Map
 
 ```
 replan/                  core runtime (A-owned: clock, state, commit, executor, runtime, recorder, replay)
