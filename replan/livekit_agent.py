@@ -125,13 +125,15 @@ async def settle_loop(
             await on_commit(committed)
 
 
-async def _run_demo() -> None:
+async def _run_demo(from_city: str = "Chicago", to_city: str = "Boston") -> None:
     """make demo's equivalent for the LiveKit path: no WebSocket loop, no
     live LiveKit session — the same signature self-correction scenario
     (a tool call, then a mid-call pivot to the same tool with different
     args), driven purely through this adapter's own functions, printing
     the verdict ledger. Uses real FDB-v3 tools (via A9), same discipline
-    as runtime.py's own demo.
+    as runtime.py's own demo. from_city/to_city are parameterized (see
+    __main__'s --from-city/--to-city) so a live demo can be run against
+    values chosen at presentation time, not just the two hardcoded here.
     """
     import asyncio
 
@@ -147,11 +149,11 @@ async def _run_demo() -> None:
     runtime = build_scenario_runtime(tools, seed=7)
     settle_task = asyncio.create_task(settle_loop(runtime, commit_printer, tick_interval=0.1))
 
-    print("=== LiveKit adapter demo: self-correction on search_flights ===")
+    print(f"=== LiveKit adapter demo: self-correction on search_flights ({from_city} -> {to_city}) ===")
     route_partial_transcript(runtime, "Find me a flight to")  # T1 fast path, no-op until B5/B6 land
-    route_tool_call_via_state(runtime, "search_flights", {"destination": "Chicago", "date": "2026-07-15"})
+    route_tool_call_via_state(runtime, "search_flights", {"destination": from_city, "date": "2026-07-15"})
     await runtime.clock.sleep(0.05)  # a later correction, before the first call has settled
-    route_tool_call_via_state(runtime, "search_flights", {"destination": "Boston", "date": "2026-07-15"})
+    route_tool_call_via_state(runtime, "search_flights", {"destination": to_city, "date": "2026-07-15"})
 
     await runtime.clock.sleep(2.0)  # let both settle
     settle_task.cancel()
@@ -163,6 +165,12 @@ async def _run_demo() -> None:
 
 
 if __name__ == "__main__":
+    import argparse
     import asyncio
 
-    asyncio.run(_run_demo())
+    parser = argparse.ArgumentParser(description="LiveKit adapter self-correction demo")
+    parser.add_argument("--from-city", dest="from_city", default="Chicago")
+    parser.add_argument("--to-city", dest="to_city", default="Boston")
+    args = parser.parse_args()
+
+    asyncio.run(_run_demo(args.from_city, args.to_city))

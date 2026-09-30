@@ -30,8 +30,8 @@ export default function App({
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-5">
         <header className="panel flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="eyebrow text-cyan-400">RePlan engine</p>
-            <h1 className="mt-1 font-mono text-xl font-bold text-hi">Flight recorder &amp; debugger for autonomous agents</h1>
+            <p className="eyebrow text-cyan-400">RePlan - </p>
+            <h1 className="mt-1 font-mono text-xl font-bold text-hi">Nothing commits until it's still true</h1>
           </div>
           <div className="flex items-center gap-3 font-mono text-xs">
             <span className="flex items-center gap-1.5 rounded border border-red-900/50 bg-red-950/20 px-3 py-1.5 font-semibold text-red-400">
