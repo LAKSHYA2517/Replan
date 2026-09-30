@@ -242,13 +242,13 @@ python evaluate_pass_rate.py --provider gemini2_5 --output report.json
 
 | Item | Link |
 |---|---|
-| Demo video (≤5 min) | `<ADD LINK HERE>` |
-| Pitch deck / slides | [`docs/PITCH_DECK.md`](docs/PITCH_DECK.md) — `<or external PPT/PDF link here, if separate>` |
-| Team declaration form | `<ADD LINK HERE>` |
+| Demo video (≤5 min) | [YouTube](https://www.youtube.com/watch?v=XKvIfU1cRao) |
+| Pitch deck / slides (PPTX) | [`docs/VITVellore_StateShift_Submission.pptx`](docs/VITVellore_StateShift_Submission.pptx) |
+| Team declaration form (PDF) | [`docs/stateShift_declaration_form_filled_final.pdf`](docs/stateShift_declaration_form_filled_final.pdf) |
 | Architecture deep-dive | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
 | Known limitations | [`LIMITATIONS.md`](LIMITATIONS.md) |
 
-> Note: `ARCHITECTURE.md`, `LIMITATIONS.md`, `docs/PITCH_DECK.md`, and `docs/DEMO_SCRIPT.md` predate the Theme 05 pivot and may still describe the original open-brief scope — worth a pass before submission if they're going to be read alongside this README.
+> Note: `ARCHITECTURE.md`, `LIMITATIONS.md`, `docs/PITCH_DECK.md` (a stale markdown draft, not the submitted deck above), and `docs/DEMO_SCRIPT.md` predate the Theme 05 pivot and may still describe the original open-brief scope — worth a pass before submission if they're going to be read alongside this README.
 
 ---
 
