@@ -265,25 +265,23 @@ export default function Timeline({ events }: TimelineProps) {
   };
 
   return (
-    <div className="w-full bg-slate-950/90 rounded-xl border border-slate-800/90 p-4 shadow-xl overflow-x-auto relative">
+    <div className="panel w-full overflow-x-auto p-4">
       {/* Top Title & Legend Bar */}
-      <div className="flex items-center justify-between pb-3 mb-2 border-b border-slate-800 text-xs">
+      <div className="flex items-center justify-between pb-3 mb-2 border-b border-line">
         <div className="flex items-center space-x-2">
           <span className="h-2.5 w-2.5 rounded-full bg-cyan-400 animate-pulse" />
-          <h3 className="font-semibold text-white tracking-wide uppercase text-[11px]">
-            Execution Swimlane Timeline (Wall-Clock Seconds)
-          </h3>
+          <h3 className="eyebrow text-hi">Execution timeline (wall-clock seconds)</h3>
         </div>
 
         {/* Legend */}
-        <div className="flex items-center space-x-4 text-[11px] font-mono text-slate-300">
+        <div className="flex items-center space-x-4 font-mono text-[11px] text-dim">
           <div className="flex items-center space-x-1.5">
             <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block" />
             <span>COMMIT</span>
           </div>
           <div className="flex items-center space-x-1.5">
             <span className="w-3 h-3 rotate-45 bg-red-500 inline-block shadow-sm shadow-red-500/50" />
-            <span className="font-bold text-red-400">STALE (Blocked)</span>
+            <span className="font-bold text-red-400">STALE (blocked)</span>
           </div>
           <div className="flex items-center space-x-1.5">
             <span className="w-3 h-3 bg-amber-500 inline-block" />

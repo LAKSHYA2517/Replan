@@ -1,6 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
 import { Event, EventType, Verdict } from '../contract.ts';
-import Timeline from './Timeline.tsx';
 
 interface DualPaneProps {
   events: Event[];
@@ -19,8 +18,38 @@ interface BaselineState {
   lastAction: string;
 }
 
+interface ReplanCommit {
+  taskId: string;
+  tool: string;
+  t: number;
+}
+
 export default function DualPane({ events }: DualPaneProps) {
   const [flashing, setFlashing] = useState<boolean>(false);
+
+  // The replan side of the comparison, derived the same honest way as the
+  // baseline below: scan the real event stream, don't assume the invariant.
+  const { replanCommits, replanWrongActions } = useMemo(() => {
+    const toolByTask = new Map<string, string>();
+    const commits: ReplanCommit[] = [];
+    let wrongActions = 0;
+
+    for (const ev of events) {
+      if (ev.type === EventType.TASK_DISPATCH) {
+        const p = ev.payload as { task_id: string; tool: string };
+        toolByTask.set(p.task_id, p.tool);
+      }
+      if (ev.type === EventType.VERDICT) {
+        const p = ev.payload as { task_id: string; verdict: Verdict; agent?: string; wrong_action?: boolean };
+        if (p.verdict === Verdict.COMMIT) {
+          commits.push({ taskId: p.task_id, tool: toolByTask.get(p.task_id) ?? p.task_id, t: ev.t });
+        }
+        if (p.agent === 'replan' && p.wrong_action === true) wrongActions += 1;
+      }
+    }
+
+    return { replanCommits: commits, replanWrongActions: wrongActions };
+  }, [events]);
 
   // Derive Baseline State purely from the event stream
   const baselineState: BaselineState = useMemo(() => {
@@ -109,94 +138,77 @@ export default function DualPane({ events }: DualPaneProps) {
   }, [events, flashing]);
 
   return (
-    <div className="w-full bg-slate-950/90 rounded-xl border border-slate-800/90 p-5 shadow-2xl flex flex-col space-y-4 font-sans">
-      {/* Dual Pane Mode Header Banner */}
-      <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+    <div className="panel flex w-full flex-col space-y-4 p-5 font-sans">
+      {/* Header */}
+      <div className="flex items-center justify-between pb-3 border-b border-line">
         <div className="flex items-center space-x-2">
           <span className="w-3 h-3 rounded-full bg-gradient-to-r from-red-500 to-emerald-500 animate-pulse" />
-          <h3 className="font-bold text-white text-sm tracking-wide uppercase">
-            Head-to-Head Architectural Comparison (Beat 5 Divergence)
+          <h3 className="font-bold text-hi text-sm tracking-wide uppercase">
+            Same incident, two architectures
           </h3>
         </div>
-        <span className="text-xs px-2.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
-          Single Event Stream Tagged by Agent
+        <span className="text-xs px-2.5 py-0.5 rounded bg-black/30 text-dim font-mono">
+          one event stream, tagged by agent
         </span>
       </div>
 
       {/* Side-by-Side Split Canvas */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Pane: Baseline Agent (Conventional Architecture) (5 Cols) */}
-        <div className="lg:col-span-4 bg-slate-900/70 rounded-xl border border-red-950/80 p-4 flex flex-col justify-between shadow-lg relative overflow-hidden">
-          {/* Header */}
+        {/* Left Pane: Naive baseline (no commit gate) */}
+        <div className="subpanel relative flex flex-col justify-between overflow-hidden border-red-950/80 p-4 lg:col-span-4">
           <div>
-            <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800">
+            <div className="flex items-center justify-between pb-3 mb-3 border-b border-line">
               <div className="flex items-center space-x-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
-                <h4 className="font-bold text-red-200 text-xs uppercase tracking-wider">
-                  Conventional Agent (Naive Loop)
-                </h4>
+                <h4 className="eyebrow text-red-200">Conventional agent &middot; naive loop</h4>
               </div>
-              <span className="text-[10px] text-slate-400 font-mono">No Commit Gate</span>
+              <span className="font-mono text-[10px] text-dim">no commit gate</span>
             </div>
 
             {/* Prominent Counter */}
             <div
-              className={`p-4 rounded-xl border mb-4 text-center transition-all duration-300 ${
+              className={`mb-4 rounded-md border p-4 text-center transition-all duration-300 ${
                 baselineState.wrongActions > 0
-                  ? 'bg-red-950/80 border-red-600 text-red-100 shadow-xl shadow-red-950 ring-2 ring-red-500'
-                  : 'bg-slate-950/80 border-slate-800 text-slate-400'
+                  ? 'border-red-600 bg-red-950/60 text-red-100 shadow-lg shadow-red-950/40 ring-1 ring-red-500'
+                  : 'border-line bg-black/20 text-dim'
               } ${flashing ? 'scale-105 brightness-150' : 'scale-100'}`}
             >
-              <div className="text-[11px] font-mono uppercase tracking-widest text-red-400 font-semibold">
-                Wrong Actions Committed
-              </div>
-              <div className="text-4xl font-extrabold font-mono mt-1 text-red-400">
+              <div className="eyebrow tracking-widest text-red-400">Wrong actions committed</div>
+              <div className="mt-1 font-mono text-4xl font-extrabold text-red-400">
                 {baselineState.wrongActions}
               </div>
               {baselineState.corrupted && (
-                <div className="mt-2 text-[10px] font-bold text-red-200 bg-red-900/70 py-1 px-2 rounded font-mono animate-pulse">
-                  ⚠ STATE CORRUPTED: DELPHI OVERWROTE MUMBAI
+                <div className="mt-2 animate-pulse rounded bg-red-900/50 px-2 py-1 font-mono text-[10px] font-bold text-red-200">
+                  &#9888; state corrupted: silently overwrote the correction
                 </div>
               )}
             </div>
 
             {/* Current Understanding Key-Value */}
-            <div className="space-y-2 text-xs font-mono">
-              <span className="text-[10px] text-slate-400 uppercase tracking-wider block">
-                Current Understanding
-              </span>
-              <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 space-y-1.5">
+            <div className="space-y-2 font-mono text-xs">
+              <span className="eyebrow block">Current understanding</span>
+              <div className="subpanel space-y-1.5 p-3">
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Locality:</span>
-                  <span
-                    className={`font-bold ${
-                      baselineState.corrupted ? 'text-red-400 font-bold underline' : 'text-slate-200'
-                    }`}
-                  >
+                  <span className="text-dim">Locality:</span>
+                  <span className={`font-bold ${baselineState.corrupted ? 'text-red-400 underline' : 'text-slate-200'}`}>
                     {baselineState.locality.toUpperCase()}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Budget:</span>
+                  <span className="text-dim">Budget:</span>
                   <span className="text-slate-200">₹{baselineState.budget}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Dates:</span>
+                  <span className="text-dim">Dates:</span>
                   <span className="text-slate-200">{baselineState.dates}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Booking Allowed:</span>
-                  <span className="text-slate-200">
-                    {baselineState.bookingEnabled ? 'true' : 'false'}
-                  </span>
+                  <span className="text-dim">Booking allowed:</span>
+                  <span className="text-slate-200">{baselineState.bookingEnabled ? 'true' : 'false'}</span>
                 </div>
-                <div className="flex justify-between pt-1 border-t border-slate-800/80">
-                  <span className="text-slate-400">Recommendation:</span>
-                  <span
-                    className={`font-semibold ${
-                      baselineState.corrupted ? 'text-red-400' : 'text-slate-300'
-                    }`}
-                  >
+                <div className="flex justify-between border-t border-line pt-1">
+                  <span className="text-dim">Recommendation:</span>
+                  <span className={`font-semibold ${baselineState.corrupted ? 'text-red-400' : 'text-slate-300'}`}>
                     {baselineState.recommendedHotel || 'Searching…'}
                   </span>
                 </div>
@@ -204,62 +216,58 @@ export default function DualPane({ events }: DualPaneProps) {
             </div>
 
             {/* In-Flight Activity */}
-            <div className="mt-4 text-xs font-mono">
-              <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1.5">
-                Last Baseline Action
-              </span>
-              <div className="p-2.5 bg-slate-950/80 rounded border border-slate-800 text-[11px] text-slate-300">
-                {baselineState.lastAction}
-              </div>
+            <div className="mt-4 font-mono text-xs">
+              <span className="eyebrow mb-1.5 block">Last baseline action</span>
+              <div className="subpanel px-2.5 py-2 text-[11px] text-slate-300">{baselineState.lastAction}</div>
             </div>
           </div>
 
           {/* Bottom Footnote */}
-          <div className="mt-4 pt-3 border-t border-slate-800/80 text-[10px] text-slate-500 font-mono">
+          <div className="mt-4 border-t border-line pt-3 font-mono text-[10px] text-dim">
             Unconditionally commits all arriving responses. Stale results overwrite present context.
           </div>
         </div>
 
-        {/* Right Pane: RePlan Runtime (Deterministic Coordination) (8 Cols) */}
-        <div className="lg:col-span-8 bg-slate-900/70 rounded-xl border border-emerald-950/80 p-4 flex flex-col justify-between shadow-lg">
+        {/* Right Pane: RePlan runtime (fingerprint gate) */}
+        <div className="subpanel flex flex-col justify-between border-emerald-950/80 p-4 lg:col-span-8">
           <div>
-            {/* Header & RePlan Counter */}
-            <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 mb-3 border-b border-line">
               <div className="flex items-center space-x-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-                <h4 className="font-bold text-emerald-300 text-xs uppercase tracking-wider">
-                  RePlan Runtime (Fingerprint Gate)
-                </h4>
+                <h4 className="eyebrow text-emerald-300">RePlan runtime &middot; fingerprint gate</h4>
               </div>
 
-              {/* Matching Size Counter for RePlan */}
               <div
-                className={`px-4 py-2 rounded-xl border flex items-center space-x-3 transition-all duration-300 ${
-                  flashing
-                    ? 'bg-emerald-950/90 border-emerald-500 scale-105 brightness-125'
-                    : 'bg-emerald-950/50 border-emerald-800/60'
+                className={`flex items-center space-x-3 rounded-md border px-4 py-2 transition-all duration-300 ${
+                  flashing ? 'scale-105 border-emerald-500 bg-emerald-950/70 brightness-125' : 'border-emerald-800/60 bg-emerald-950/30'
                 }`}
               >
-                <span className="text-[11px] font-mono uppercase tracking-wider text-emerald-400 font-semibold">
-                  Wrong Actions:
-                </span>
-                <span className="text-2xl font-extrabold font-mono text-emerald-400">0</span>
-                <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-900/80 text-emerald-200 font-mono border border-emerald-700">
-                  Invariant I2 Held
-                </span>
+                <span className="eyebrow text-emerald-400">Wrong actions:</span>
+                <span className="font-mono text-2xl font-extrabold text-emerald-400">{replanWrongActions}</span>
               </div>
             </div>
 
-            {/* Embedded Timeline View from D2 */}
-            <div className="w-full overflow-hidden">
-              <Timeline events={events} />
+            {/* Real committed actions, derived the same way as the baseline above */}
+            <div className="font-mono text-xs">
+              <span className="eyebrow mb-1.5 block">Committed actions</span>
+              {replanCommits.length === 0 ? (
+                <p className="subpanel px-3 py-3 text-dim">No commits yet.</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {replanCommits.map((c) => (
+                    <li key={c.taskId} className="subpanel flex items-center justify-between px-3 py-2">
+                      <span className="text-slate-200">{c.tool}</span>
+                      <span className="text-dim">{c.t.toFixed(2)}s</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
 
           {/* Bottom Callout */}
-          <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs font-mono text-emerald-300/80">
-            <span>✓ Stale-Result Firewall: Fingerprint mismatch rejects obsolete background work</span>
-            <span className="text-[10px] text-slate-400">Total Order Monotonic Chain</span>
+          <div className="mt-3 flex items-center justify-between border-t border-line pt-3 font-mono text-xs text-emerald-300/80">
+            <span>&#10003; Stale-result firewall: fingerprint mismatch rejects obsolete background work</span>
           </div>
         </div>
       </div>
