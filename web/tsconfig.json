@@ -19,9 +19,6 @@
   "include": ["src"],
   "exclude": [
     "src/views/Console.tsx",
-    "src/views/Controls.tsx",
-    "src/views/DualPane.tsx",
-    "src/views/Scrubber.tsx",
-    "src/views/Timeline.tsx"
+    "src/views/Controls.tsx"
   ]
 }

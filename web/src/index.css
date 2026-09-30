@@ -8,7 +8,7 @@
 
 body {
   margin: 0;
-  background-color: #0a0d14;
+  background-color: #08090c;
   font-family: 'Inter', sans-serif;
   overflow-x: hidden;
 }
@@ -47,4 +47,72 @@ body {
 
 .animate-pulse-subtle {
   animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes entry-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-entry {
+  animation: entry-in 0.3s ease-out;
+}
+
+/* A world-state field that just changed: one deliberate flash, not a loop */
+@keyframes flash-row {
+  0% { background-color: rgba(34, 211, 238, 0.16); }
+  100% { background-color: transparent; }
+}
+
+.animate-flash-row {
+  animation: flash-row 1.1s ease-out;
+}
+
+/* Fine technical dot-grid — control-room texture, not decoration */
+.bg-dot-grid {
+  background-image: radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.05) 1px, transparent 0);
+  background-size: 24px 24px;
+}
+
+@layer components {
+  /* Flat, thin-bordered panel — the one container style used everywhere.
+     No blur, no glow: deliberately opposite of the earlier glassmorphism pass. */
+  .panel {
+    @apply rounded-lg border border-line bg-[#0d0f14];
+  }
+
+  /* A box nested inside a .panel (comparison cards, graph fork columns) —
+     one step down in radius/border weight so nesting reads as hierarchy,
+     not as two unrelated card styles. */
+  .subpanel {
+    @apply rounded-md border border-line bg-black/20;
+  }
+
+  .panel-header {
+    @apply border-b border-line px-5 py-3.5;
+  }
+
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.18em] text-dim;
+  }
+
+  .panel-title {
+    @apply mt-0.5 font-mono text-sm font-semibold text-hi;
+  }
+
+  .btn {
+    @apply rounded border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-primary {
+    @apply btn border-cyan-500/50 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20;
+  }
+
+  .btn-ghost {
+    @apply btn border-line bg-black/20 text-dim hover:border-white/20 hover:text-hi;
+  }
+
+  .btn-ghost.is-active {
+    @apply border-cyan-500/50 bg-cyan-500/10 text-cyan-300;
+  }
 }

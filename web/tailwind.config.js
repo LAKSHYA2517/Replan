@@ -23,7 +23,10 @@ export default {
           frozen: '#8b5cf6',
           cancelled: '#64748b',
           duplicate: '#eab308',
-        }
+        },
+        hi: '#e2e8f0',
+        dim: '#64748b',
+        line: 'rgba(255, 255, 255, 0.08)',
       },
       fontFamily: {
         mono: ['JetBrains Mono', 'Fira Code', 'Menlo', 'Monaco', 'Courier New', 'monospace'],
