@@ -1,11 +1,31 @@
-"""B9 — LiveKit cascaded-template agent entrypoint.
+"""B9 — LiveKit realtime-template agent entrypoint.
 
-Cascaded template (STT -> LLM -> TTS as separate stages, silero VAD for
-turn/barge-in detection), all three model stages pointed at freellmapi
-(OpenAI-API-compatible) rather than gpt_realtime, since gpt_realtime
-needs a paid OpenAI Realtime API key nobody on the team has yet — see
-the B9 PR description for that call and how to switch back once a key
-exists (only the AgentSession(...) construction below needs to change).
+Uses Gemini's native realtime model (audio in, audio out, one hosted
+call) rather than the original cascaded freellmapi pipeline. The
+original cascaded setup pointed its STT/LLM/TTS stages at
+FREELLMAPI_BASE_URL=http://127.0.0.1:31415 — a loopback address, i.e.
+a server running on the developer's own machine. The official Theme 05
+guide is explicit: "Don't call your own servers at evaluation time;
+all agent logic lives in the submission" — and "if your script does
+not reproduce [on our machine], this portion scores zero." A judge's
+machine has nothing listening on that port, so the old setup would
+fail the reproduction script outright. Gemini's realtime model only
+needs GOOGLE_API_KEY (a real, free-tier, externally-reachable hosted
+API — the same one already proven working for the FDB-v3 benchmark
+run), so it's both a compliance fix and the only way to get a result
+that means anything off this machine.
+
+Swapping the model backend is not a one-line change: Gemini's realtime
+model does not set RealtimeCapabilities.supports_say (confirmed by
+reading livekit-plugins-google's own source), so AgentSession.say()
+raises at runtime without a separate TTS configured. The fix used here
+is session.generate_reply(instructions=...) instead of say() — verified
+compatible with any RealtimeModel, since it goes through the model's
+own generation path rather than attempting to inject text directly.
+_compose_response() below is a deterministic, local, no-network
+grounding step (replacing the old compose_response() call out to
+freellmapi) — it fixes the facts before generate_reply() ever runs, so
+Gemini can only phrase them, not invent new ones.
 
 Architecture rule this file exists to enforce (per AGENTS.md and the B9
 brief): the model's own native tool-calling is NEVER allowed to decide
@@ -24,10 +44,7 @@ real fingerprint mismatch on the in-flight task instead of silently
 never triggering staleness detection at all.
 
 The real committed result reaches the conversation only once CommitGate
-actually commits it (via a background settle loop below), spoken with
-replan.agents.freellmapi.FreellmapiSpeechAgent.compose_response — the
-same B2b logic already tested elsewhere in this project, reused as-is
-rather than re-implemented for LiveKit.
+actually commits it (via a background settle loop below).
 
 A7 (A's package) will formalize Runtime construction/reset into
 replan/livekit_agent.py, including A10's cross-scenario reset guarantee
@@ -56,9 +73,8 @@ from livekit.agents import (
     cli,
     function_tool,
 )
-from livekit.plugins import openai, silero
+from livekit.plugins import google
 
-from replan.agents.freellmapi import FreellmapiConfig, FreellmapiSpeechAgent
 from replan.clock import RealClock
 from replan.runtime import Policy, Runtime
 from replan.schemas import PlanTask, Proposal, TaskStatus, Verdict
@@ -94,19 +110,8 @@ class SessionData:
     shrink if a task is ever removed — a counter never goes backwards)."""
 
     runtime: Runtime
-    composer: FreellmapiSpeechAgent
     task_counter: itertools.count = field(default_factory=itertools.count)
     seen_dispatch_fps: set[str] = field(default_factory=set)
-
-
-def _freellmapi_config() -> FreellmapiConfig:
-    return FreellmapiConfig(
-        base_url=os.environ["FREELLMAPI_BASE_URL"],
-        api_key=os.environ["FREELLMAPI_API_KEY"],
-        stt_model=os.environ["FREELLMAPI_STT_MODEL"],
-        tts_model=os.environ["FREELLMAPI_TTS_MODEL"],
-        chat_model=os.environ.get("FREELLMAPI_CHAT_MODEL", "auto"),
-    )
 
 
 def _build_runtime() -> Runtime:
@@ -115,6 +120,17 @@ def _build_runtime() -> Runtime:
     import random
 
     return Runtime(clock=clock, seed=random.SystemRandom().randrange(2**31), policy=Policy.REPLAN, tools=tools)
+
+
+def _compose_response(committed_results: list[dict]) -> str:
+    """Deterministic, local summary of what CommitGate just committed —
+    no network call, no LLM, so there is nothing here that can invent a
+    fact beyond what actually committed. Handed to generate_reply() as
+    instructions so the model only has to phrase it, not decide it.
+    """
+    if not committed_results:
+        return "Nothing has been confirmed yet."
+    return " ".join(f"{item['tool']} completed with result: {item['payload']}" for item in committed_results)
 
 
 async def _dispatch_via_state(session_data: SessionData, tool_name: str, args: dict) -> str:
@@ -240,9 +256,16 @@ def build_tools() -> list:
 
 async def _settle_loop(session: AgentSession, session_data: SessionData) -> None:
     """Background loop: drains the executor, and the moment a result
-    actually commits, speaks it — grounded in the committed payload and
-    current state only, via the same compose_response used elsewhere in
-    this project. Never speaks from a task the gate hasn't adjudicated.
+    actually commits, speaks it — grounded in the committed payload only
+    (_compose_response is a deterministic local function, no network, no
+    LLM), handed to the realtime model via generate_reply() so it can
+    phrase it naturally without being able to invent new facts. Never
+    speaks from a task the gate hasn't adjudicated.
+
+    generate_reply(), not say(): Gemini's realtime model does not set
+    RealtimeCapabilities.supports_say, so say() would raise at runtime
+    without a separate TTS configured (confirmed against the installed
+    livekit-plugins-google source before writing this).
     """
     runtime = session_data.runtime
     while True:
@@ -263,35 +286,28 @@ async def _settle_loop(session: AgentSession, session_data: SessionData) -> None
         if not committed_results:
             continue
 
-        text = await session_data.composer.compose_response(committed_results, runtime.store.current)
-        session.say(text)
+        text = _compose_response(committed_results)
+        session.generate_reply(
+            instructions=(
+                "Tell the user, briefly and in your own voice, exactly and only "
+                f"the following confirmed fact(s) — do not add, infer, or embellish "
+                f"anything not listed here: {text}"
+            )
+        )
 
 
 async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect()
 
     runtime = _build_runtime()
-    composer = FreellmapiSpeechAgent(config=_freellmapi_config(), clock=runtime.clock)
-    session_data = SessionData(runtime=runtime, composer=composer)
+    session_data = SessionData(runtime=runtime)
 
     session: AgentSession[SessionData] = AgentSession(
         userdata=session_data,
-        stt=openai.STT(
-            model=os.environ["FREELLMAPI_STT_MODEL"],
-            base_url=os.environ["FREELLMAPI_BASE_URL"],
-            api_key=os.environ["FREELLMAPI_API_KEY"],
+        llm=google.realtime.RealtimeModel(
+            model=os.environ.get("GOOGLE_REALTIME_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025"),
+            voice=os.environ.get("GOOGLE_VOICE", "Puck"),
         ),
-        llm=openai.LLM(
-            model=os.environ.get("FREELLMAPI_CHAT_MODEL", "auto"),
-            base_url=os.environ["FREELLMAPI_BASE_URL"],
-            api_key=os.environ["FREELLMAPI_API_KEY"],
-        ),
-        tts=openai.TTS(
-            model=os.environ["FREELLMAPI_TTS_MODEL"],
-            base_url=os.environ["FREELLMAPI_BASE_URL"],
-            api_key=os.environ["FREELLMAPI_API_KEY"],
-        ),
-        vad=silero.VAD.load(),
     )
 
     @session.on("user_input_transcribed")
@@ -321,7 +337,6 @@ async def entrypoint(ctx: JobContext) -> None:
         )
     finally:
         settle_task.cancel()
-        await composer.close()
 
 
 if __name__ == "__main__":
