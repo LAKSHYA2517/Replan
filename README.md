@@ -1,64 +1,44 @@
-# RePlan: A Deterministic Commit Gate for Interruptible Real-Time Agents
+# RePlan: A Commit Gate for Interruptible Voice Agents
 
-> **Samsung PRISM GenAI Hackathon 2026 · Theme 05 — Interruptible Real-Time Agents**
-> Built and benchmarked against **Full-Duplex-Bench v3** (LiveKit-based real-time tool-calling benchmark).
-
----
-
-## 1. Executive Summary
-
-Voice agents that use tools fail in one specific, well-documented way: the user changes their mind mid-task ("actually, make that Mumbai"), but a tool call dispatched *before* the correction is still in flight. When that stale result lands, most systems either silently commit it (corrupting state) or the underlying model just gets confused. In the Full-Duplex-Bench v3 research this project targets, **self-correction is the single worst-scoring category across every system tested** — better architectures haven't fixed it because it isn't a model problem, it's a state-management problem.
-
-**RePlan is the state-management fix.** It's a deterministic runtime that sits between an LLM's tool-call proposals and their effects. Every dispatched tool call carries a **content-addressed fingerprint** of the state it was computed against. A result only commits if that fingerprint still matches the runtime's *current* state at the moment the result arrives. If the user corrected mid-flight, the fingerprint no longer matches — the result is rejected as `STALE`, never applied, never spoken back to the user. This is enforced structurally by a single writer (`CommitGate`), not by prompting the model to "be careful."
+> **Team StateShift** · VIT Vellore · Samsung PRISM GenAI Hackathon 2026 · **Theme 05: Interruptible Real-Time Agents**
+>
+> **Demo video:** [DRIVE](https://drive.google.com/file/d/1YndsB2Jcz9WDvcaM8tGXdfnDzBvDV7bU/view?usp=sharing) · **Slides:** [`docs/VITVellore_StateShift_Submission.pptx`](docs/VITVellore_StateShift_Submission.pptx) · **AI-usage declaration:** [`docs/stateShift_declaration_form_filled_final.pdf`](docs/stateShift_declaration_form_filled_final.pdf)
 
 ---
 
-## 2. What's Actually Novel Here
+## Demo video
 
-This is **not** a better prompt, a bigger model, or a retry loop. The claim is narrower and more falsifiable:
+**Watch on Google Drive:** https://drive.google.com/file/d/1YndsB2Jcz9WDvcaM8tGXdfnDzBvDV7bU/view?usp=sharing
 
-- **Fingerprint validity is a total function of (tool, resolved arguments, state version) — never of wall-clock arrival order.** A result that arrives late is rejected *because* the world changed underneath it, not because it arrived after some timeout.
-- **Single writer.** Only `CommitGate` ever mutates committed state (`replan/commit.py`, under 60 lines). No tool, no agent, no speculative branch can write state directly — enforced as a banned pattern, checked by CI (`make check`).
-- **Effect safety.** `IRREVERSIBLE` tools are structurally barred from speculative dispatch — the executor won't even attempt them until their inputs are confirmed, not just "likely."
-- **Causal completeness, not just correctness.** Every committed state version names the exact event and result that produced it — the whole decision history replays byte-for-bit identically from a recorded event log (`make replay` verifies this against a re-seeded run).
-- **This is independently falsifiable**, not a claim you have to take our word for: we benchmarked the exact failure mode against FDB-v3 (below), and the architecture itself is provable live in under two seconds with no canned data (see §6).
+## 1. Summary
+
+Voice agents fail in one specific way: a user changes their request mid-task ("Chicago… actually, Seattle"), but a tool call started *before* the change is still running. When its result returns, most systems apply it anyway.
+
+RePlan does not try to make the model smarter. It adds a **commit gate**: every tool result carries the fingerprint of the state it was computed against, and it is applied **only if that fingerprint still matches the current state**. Otherwise it is rejected as `STALE` and never reaches the user or the state.
+
+| What we built | Where |
+|---|---|
+| A deterministic runtime with a single state writer and a content-addressed commit gate | `replan/commit.py`, `replan/runtime.py` |
+| A LiveKit voice agent that routes every tool call through that gate | `agent.py`, `replan/livekit_agent.py` |
+| A second use case (in-car navigation) that uses the same gate | `python replan/livekit_agent.py --scenario incar` |
+| A reproduction script that runs the FDB-v3 benchmark against the agent end to end | `reproduce_fdb_v3.sh` |
+| A console that replays a recorded session step by step | `web/` |
+
+---
+
+## 2. What is new in this approach
+
+- **The check is about the data, not the clock.** A result is accepted or rejected by comparing fingerprints of the request and the state, never by arrival order or a timeout.
+- **One writer.** Only `CommitGate` changes committed state. This is enforced by the build (`make check` rejects bypass patterns) and by tests.
+- **Irreversible actions are never speculative.** The executor won't start them until their inputs are confirmed.
+- **Every decision is recorded.** The event log is hash-chained, so a run can be replayed and verified (`make replay`).
+- **The same gate covers different domains.** The flight search and the in-car navigation use identical logic; only the tools differ.
 
 ---
 
 ## 3. Architecture
 
-```
-USER SPEECH / TEXT
-  ↓
-FAST-PATH VAD & HYPOTHESIS         (replan/fastpath.py, replan/hypothesis.py)
-  ↓
-LLM PROPOSAL                        (replan/agents/*) → Proposal objects only, never a direct state write
-  ↓
-VERSIONED STATE STORE               (replan/state.py) — append-only, every version immutable
-  ↓
-DEPENDENCY-AWARE PLAN GRAPH         (replan/depgraph.py) — content-addressed dispatch fingerprints
-  ↓
-SPECULATIVE ASYNC EXECUTOR          (replan/executor.py, replan/freeze.py) — dispatches, freezes on hypothesis
-  ↓
-TRANSACTIONAL COMMIT GATE           (replan/commit.py) — THE single state writer
-  ├── COMMIT     → fingerprint matches current state, version incremented
-  ├── STALE      → fingerprint mismatch (dispatched at vN, now vM) — discarded
-  ├── DUPLICATE  → call_id already adjudicated — suppressed
-  └── INVALID    → tool execution failure — rejected
-  ↓
-RECONCILE + COMPENSATE              (replan/reconcile.py) — invalidate/adopt/compensate on correction
-  ↓
-FLIGHT RECORDER                     (replan/recorder.py) — monotonic, SHA-256 hash-chained event ledger
-  ↓
-LIVEKIT ADAPTER                     (replan/livekit_agent.py) — routes a LiveKit session's turns/tool-calls
-  through this same pipeline; agent.py wires it into a live voice session
-  ↓
-WEB CONSOLE                         (web/) — causal execution graph, world-state diff view, flight recorder
-```
-
-**Tool surface** (`replan/tools/registry.py`, frozen): 26 declared tools — 12 are the real Full-Duplex-Bench v3 scored tools (`search_flights`, `book_flight`, `update_identity_doc`, `get_card_benefits`, `get_exchange_rate`, `modify_autopay`, `search_apartments`, `calculate_commute`, `update_search_filter`, `track_order`, `search_products`, `add_to_cart`), wired to FDB-v3's own mock functions via `replan/tools/fdb_contract.py` (not reimplemented — the actual functions from the benchmark repo are called directly); the other 14 are the original hotel/smart-home scenario tools this project started with.
-
-### 3.1 Detailed Component Diagram
+The diagram below shows the full pipeline. Everything above the gate may be wrong, speculative, or cancelled. Only results that pass the gate change state.
 
 ```mermaid
 flowchart TD
@@ -122,158 +102,176 @@ flowchart TD
     class P stale
     class Q,R warn
     class N,H gate
+
 ```
 
-Read the diamond in the middle first: `CommitGate` is the only box with four outgoing arrows, and it's the only box anything ever writes state through. Everything above it is free to be wrong, speculative, or cancelled — none of that matters until a result reaches that one gate and its fingerprint is checked against whatever is true *right now*.
+**Components in the live voice path:**
+- **Gemini 2.5 Flash native audio** (via `GOOGLE_API_KEY`) handles speech in and out and decides when to call a tool.
+- **Each tool call** writes its arguments into state and creates a task whose arguments refer to that state, so a later correction makes the task stale.
+- **The settle loop** announces a result only after the gate commits it. The announcement waits for the agent to be idle and retries if generation fails.
+- **Tool-call records** are written in the format the benchmark scorer reads, so every call is counted.
+
+**Tool surface** (`replan/tools/registry.py`): 26 declared tools. Twelve are the Full-Duplex-Bench v3 scored tools, wired directly to the benchmark's own mock functions (`replan/tools/fdb_contract.py`). The other fourteen cover the original hotel, smart-home, and in-car scenarios.
 
 ---
 
-## 4. Benchmark Results (Full-Duplex-Bench v3)
+## 4. Demonstrations
 
-We ran the real FDB-v3 released dataset (100 examples, 79 scenarios, 4 domains, 3 difficulty levels) against a `gemini-2.5-flash-native-audio-preview` agent, using FDB-v3's own stock LiveKit template — **this measures the raw model's tool-calling reliability with no RePlan safeguard in the loop**, to independently confirm the problem this project targets is real, not invented for the pitch.
+Each demonstration is a command you can run. The first is the core proof; the others show the same rule in other settings.
 
-| Metric | Result | Context |
-|---|---|---|
-| Turn-take success | 99/100 | 1 example produced no spoken response at all |
-| Tool selection accuracy | 85.4% | model usually calls the *right* tool |
-| Argument accuracy | 50.5% | but gets the *arguments* wrong about half the time — the dominant failure mode |
-| Overall pass rate | 44/100 | full correctness: right tool **and** right arguments |
-| **Self-correction pass rate** | **35.3%** | the disfluency category this project targets |
-| Pass rate, scenarios with a state rollback | 35.3% vs. 45.8% without | ~10-point gap — rollback scenarios are measurably harder for an unmodified model |
-| Avg latency (turn-taken, excl. interruptions) | 12.39s ± 5.41s | CPU-bound ASR + network round trip, not a RePlan cost |
-
-**Honest framing**: the published FDB-v3 research reports self-correction Pass@1 between **18% (naive cascaded systems)** and **59% (best realtime model)**. Our measured 35.3% sits inside that range — a believable, unremarkable number for a raw model with no architectural help, which is exactly the point: *the problem is real and hard even for a strong model.* This run does not benchmark RePlan's own fix — that's demonstrated directly and deterministically instead (below), because the stock FDB-v3 agent template dispatches tool calls directly and never routes through `Runtime`/`CommitGate` at all.
-
-Full reports: `gemini2_5_evaluation_report.json`, `gemini2_5_pass_rate_report.json` (generated by `evaluate_tool_calls.py` / `evaluate_pass_rate.py` against the FDB-v3 clone).
-
----
-
-## 5. Future Work — Raising the Benchmark Score
-
-These numbers were produced by the raw FDB-v3 stock template (§4), not by RePlan itself — the highest-leverage next step is closing that gap directly, then addressing what the numbers actually show is broken:
-
-1. **Wire `agent.py` (the RePlan-integrated agent) into the FDB-v3 harness itself**, instead of `lk_agent_tool.py`. This is the single biggest gap: right now we've only proven the commit-gate mechanism works in isolation (§6) and confirmed the baseline problem is real (§4) — we haven't yet run the *actual fingerprint-gated agent* through the same 100-example sweep to get a paired before/after score on the self-correction and rollback categories specifically.
-2. **Target argument accuracy, not tool selection.** The data says tool selection is already strong (85.4%) but argument extraction is the dominant failure (50.5%) — that's a proposal-layer problem, not a commit-gate problem. A structured slot-confidence check before dispatch (reusing the existing `Proposal`/`Hypothesis` machinery to trigger a clarifying question on a low-confidence argument instead of guessing and dispatching) would target this directly, and it's the fix most likely to move the overall pass rate, since almost every failure bucket is argument-driven.
-3. **Investigate the domain gap** (98.9% ecommerce vs. 49.4% housing tool-selection accuracy) before trusting it as a real finding — first confirm it isn't an artifact of stricter argument-matching in that domain's scenarios, then if real, add domain-specific few-shot calibration to the proposal layer.
-4. **Separate RePlan's own overhead from ASR/network latency in reporting.** The measured 12.39s avg latency is CPU-bound ASR plus a cross-region network round trip — none of it is RePlan's cost. Publishing the actual dispatch-to-commit latency inside the runtime (which the fast-path budgets already target at T0 < 50ms, T1 < 150ms) alongside the end-to-end number would make the "our overhead is negligible" case explicit instead of implicit.
-5. **Run a true paired naive-vs-RePlan comparison across all 100 examples**, not just the one illustrative signature scenario the web console currently shows — dispatch both `lk_agent_tool.py` and `agent.py` against every example and report matched wrong-action counts, rather than relying on the single `baseline_case_study_wrong_actions` fixture value.
-6. **Complete the two evaluation dimensions currently skipped for lack of a paid key** — `--use-llm` (Response Quality) and `analyze_tool_latency.py`'s third metric both need `OPENAI_API_KEY`; getting one (or substituting a free judge model) would complete the scoring picture rather than leaving two dimensions blank.
-7. **Benchmark beyond one model.** Only `gemini2_5` was run, due to free-tier availability — testing `grok`, `gemini3_1`, and `ultravox` would show whether the self-correction gap is universal across models (strengthening the "this is an architecture problem, not a model problem" claim) or specific to this one.
-
----
-
-## 6. Proving the Fix Live (Not a Canned Demo)
+### 4.1 Random-city proof (terminal)
 
 ```bash
-# pick a destination with no advance knowledge of the outcome
 python3 -c "import random; print(random.choice(['Boston','Austin','Denver','Seattle']))"
-
-# feed it straight into the runtime
-FDB_V3_PATH=/path/to/Full-Duplex-Bench/v3 python replan/livekit_agent.py --to-city <the word it printed>
+FDB_V3_PATH=/path/to/Full-Duplex-Bench/v3 python replan/livekit_agent.py --to-city <city>
 ```
 
-This simulates "find me a flight to Chicago" followed immediately by a correction to whatever city you picked — using real FDB-v3 mock tool functions, a real injected clock, and a content hash computed at runtime, not stored anywhere in advance:
+The city is picked at random, so the outcome is not known in advance. The Chicago search is marked `stale`, the new search is `commit`, and the final state holds only the new city.
 
+### 4.2 In-car navigation (second use case, terminal)
+
+```bash
+python replan/livekit_agent.py --scenario incar --to-destination Denver
 ```
-verdict ledger (2 decisions):
-      call-1 |   stale | dispatch fp e5169e4b... != current bb60ef5a... (dispatched at v1, now v2)
-      call-2 |  commit | fingerprint matches current state
-final state: {'search_flights__destination': 'Austin', ...}
+
+A route to Chicago is started, and the destination changes to Denver before the route is confirmed. The Chicago route is rejected as stale, and only the Denver route becomes active. Cancellation of an already-applied route is part of the design but is **not demonstrated** here; it requires the full reconciliation path.
+
+### 4.3 Live voice (LiveKit console)
+
+```bash
+python agent.py console
 ```
-The first fingerprint is identical on every run (deterministic hash of the same Chicago call); only the second changes, because it depends on whatever city you picked — proof this is computed, not scripted.
+
+Ask for a flight, then correct it after the first result. The first search completes before the correction, so the correction runs a new search and only the new result is spoken. The terminal shows each tool call, dispatch, and verdict.
+
+### 4.4 Console walkthrough (web)
+
+```bash
+cd web && npm install && npm run dev   # http://localhost:5173
+```
+
+The page replays one recorded session. Step through it with the slider or **Next**, and open the stale row to see its reason. The page is a replay, not a live view of the agent.
 
 ---
 
-## 7. Quickstart (Zero API Key Required for the Core Runtime)
+## 5. Benchmark: Full-Duplex-Bench v3
 
-### Prerequisites
-* Python 3.11+
-* Node.js 18+ and npm
+FDB-v3 contains 100 recorded human requests across four domains and three difficulty levels. Each request is scored on the tool calls it should produce and their arguments. The benchmark does not interrupt the agent, so this measures how well the agent handles a whole request, including self-corrections inside the request.
+
+**Final run, final code** (`results/20261004-210839`, all 100 examples scored, local scorer without the LLM judge):
+
+| Measure | Our agent | Raw Gemini baseline | Difference |
+|---|---|---|---|
+| Responded at all | 94 / 100 | 99 / 100 | −5 |
+| Tool selection accuracy | **90.9%** | 85.4% | +5.5 |
+| Argument accuracy | 39.4% | 50.5% | −11.1 |
+| Overall pass rate | 28% | 44% | −16 |
+| Self-correction pass rate | **52.9%** | 35.3% | +17.6 |
+| Pass rate with a state rollback | **52.9%** | 35.3% | +17.6 |
+| Pass rate without a state rollback | 22.9% | 45.8% | −22.9 |
+| Average latency (turn-taken) | 12.5 s | 12.4 s | — |
+
+**By domain (tool selection / argument accuracy):** ecommerce 86.1% / 59.8%, finance 95.3% / 50.7%, housing 81.2% / 16.0%, travel 87.0% / 17.5%.
+
+**How to read this:**
+- Tool choice and self-correction are better than the raw model. The self-correction sample is small, so it is a signal rather than a proof.
+- Argument accuracy and overall pass rate are below the raw model. Much of the argument gap is formatting (for example "keyboard" for "keyboards"), which the official LLM judge may accept. The local scorer is stricter than the official one, so these numbers are a lower bound on argument accuracy.
+- Six requests got no spoken response. This is the most important bug to fix, since a silent request scores zero.
+
+**Reproduce it:**
 
 ```bash
-git clone https://github.com/LAKSHYA2517/Replan.git
-cd Replan
+./reproduce_fdb_v3.sh                       # full run, about 2 hours
+DRY_RUN_SECONDS=600 ./reproduce_fdb_v3.sh   # 10-minute check
+```
 
-python3.11 -m venv .venv || python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install --upgrade pip
+The script installs what is missing, starts the agent, runs the benchmark against it, scores the run without the LLM judge, and stops the agent. It needs a `.env` with `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, and `GOOGLE_API_KEY`. The benchmark data is downloaded from the link in the FDB-v3 README if it is not already present.
+
+---
+
+## 6. Limitations
+
+- **Argument formatting** is the largest gap. The agent sometimes reformats values the user said exactly.
+- **Six silent requests** in the final run, which we have not yet traced.
+- **Compensation** of an already-applied route is designed but not demonstrated.
+- **The live voice correction** usually arrives after the first search has finished, so it shows a new search rather than a rejected result. The rejection is shown by the terminal demonstrations.
+- **The console** replays a recorded session; it does not show live agent events.
+- **The reproduction script** has been run on the authors' Mac, not yet on a clean machine.
+
+Full detail is in [`LIMITATIONS.md`](LIMITATIONS.md) and [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+## 7. Next steps
+
+1. Trace and fix the six silent requests.
+2. Improve argument fidelity: copy identifiers, values, and dates exactly as spoken.
+3. Connect compensation to the live voice path, so an applied route can be cancelled.
+4. Bridge the live agent to the console, so the page follows the session.
+5. Run the reproduction script on a clean machine.
+
+---
+
+## 8. Quickstart
+
+**Prerequisites:** Python 3.11+, Node.js 18+, and (for the benchmark) Git, Python 3.10, and ffmpeg.
+
+```bash
+git clone https://github.com/LAKSHYA2517/Replan.git && cd Replan
+python3.11 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-make check      # banned-pattern / CI constraint check
-make test       # full acceptance suite
-make demo       # signature scenario, deterministic replay mode, no network
-make replay     # verifies bit-for-bit SHA-256 chain-hash replay equivalence
-
-cd web
-npm install
-npm run dev     # http://localhost:5173
+make check      # repository constraints
+make test       # 100 acceptance tests
+make demo       # signature scenario, deterministic, no network
+make replay     # bit-for-bit replay verification
 ```
 
-`make demo` prints a real verdict ledger including a correctly-rejected stale result, with zero API keys and zero network calls (`REPLAN_LLM_MODE=replay`, the default). `make replay` re-runs the same scenario under a different seed and confirms the state chain hash matches bit-for-bit.
-
-The web console (`http://localhost:5173`) replays a recorded signature session through: a live **world-state** panel with per-field diff highlighting, a hand-built **causal execution graph** (state → plan → action → verdict, forking into an invalidated branch on correction — click any node for its real dispatch fingerprint and rejection reason), an **incident replay** control with a real scrubber, a **naive-vs-RePlan dual-pane** comparison derived from the same event stream, and a raw **flight recorder** event log.
-
-### FDB-v3 benchmark reproduction (optional, heavier)
-
-```bash
-# separate clone, separate venv — FDB-v3's own dependencies (NeMo ASR, etc.) are unrelated to RePlan's
-git clone https://github.com/DanielLin94144/Full-Duplex-Bench.git
-cd Full-Duplex-Bench/v3
-# download fdb_v3_data_released/ per the repo's own README, set up .env.local with LiveKit + provider keys
-LK_PROVIDER=gemini2_5 python lk_agent_tool.py start                      # terminal 1
-python run_tool_benchmark_all_released.py --provider gemini2_5          # terminal 2
-python evaluate_tool_calls.py --provider gemini2_5 --output report.json # scoring (omit --use-llm without an OpenAI key)
-python evaluate_pass_rate.py --provider gemini2_5 --output report.json
-```
+Copy `.env.example` to `.env` and fill in the keys you need. The core runtime and tests need no keys. The live demonstrations need `GOOGLE_API_KEY`; the LiveKit ones also need the three `LIVEKIT_*` variables.
 
 ---
 
-## 8. Makefile Targets
+## 9. Make targets
 
-| Target | Command | Purpose |
-|---|---|---|
-| `make check` | banned-pattern grep | Enforces repo constraints (no bare `time.time()`, no threads, no commit-gate bypass flags) |
-| `make test` | `pytest -q` | Full acceptance suite against the frozen contract schemas (100 tests) |
-| `make demo` | `python -m replan.runtime` | Signature scenario, deterministic replay mode |
-| `make replay` | `python -m replan.replay` | Verifies bit-for-bit SHA-256 chain-hash replay equivalence |
-| `make bench` | `python -m bench.run` | Factorial benchmark sweeps over chaos levels and latency profiles |
-
----
-
-## 9. Judge's Guide — What to Look At First
-
-1. **The commit gate** ([`replan/commit.py`](replan/commit.py)) — the entire architectural claim, under 60 lines: a result commits only if `dispatch_fp == fingerprint(task, current_state)`.
-2. **The LiveKit adapter** ([`replan/livekit_agent.py`](replan/livekit_agent.py)) — `build_scenario_runtime`, `route_tool_call_via_state`, and the live self-correction demo at the bottom (§6 above).
-3. **The FDB-v3 tool contract** ([`replan/tools/fdb_contract.py`](replan/tools/fdb_contract.py)) — thin wrappers calling FDB-v3's *actual* mock functions directly, proven byte-identical to the upstream benchmark repo.
-4. **The causal execution graph** ([`web/src/views/CausalGraph.tsx`](web/src/views/CausalGraph.tsx)) — click any action node for the real inspector panel (fingerprint, state version, rejection reason).
-5. **The frozen contract pack** ([`replan/schemas.py`](replan/schemas.py) & [`web/src/contract.ts`](web/src/contract.ts)) — shared types between Python and TypeScript, frozen at Hour Zero.
-6. **The acceptance suite** ([`tests/`](tests/)) — 31 tests across 9 files, all passing (`make test`).
-7. **Cross-scenario isolation** ([`replan/runtime.py`](replan/runtime.py)'s `scenario_id` parameter) — proves a fresh `CommitGate`/`StateStore`/LLM-cache per scenario, no state leaking between benchmark examples in one process.
+| Target | Purpose |
+|---|---|
+| `make check` | Enforces repository constraints (no bare clocks, no threads, no commit-gate bypass flags) |
+| `make test` | Runs the acceptance tests |
+| `make demo` | Signature scenario, deterministic |
+| `make replay` | Verifies replay equivalence |
+| `make bench` | Factorial sweeps over chaos levels and latency profiles |
 
 ---
 
-## 10. Submission Materials
+## 10. Guide for judges
+
+1. **The commit gate:** `replan/commit.py`. Results are applied only if their fingerprint matches the current state.
+2. **The live voice agent:** `agent.py`. Every tool call goes through the gate; the settle loop announces only committed results.
+3. **The terminal adapter:** `replan/livekit_agent.py`, with the flight demo and the in-car demo.
+4. **The benchmark integration:** `replan/tools/fdb_contract.py` calls the benchmark's own mock functions directly.
+5. **The reproduction script:** `reproduce_fdb_v3.sh`.
+6. **The console:** `web/src/views/`. It replays a recorded session; the views are `CausalGraph.tsx`, `WorldState.tsx`, `DualPane.tsx`.
+7. **Tests:** `tests/`, 100 passing.
+
+---
+
+## 11. Submission materials
 
 | Item | Link |
 |---|---|
-| Demo video (≤5 min) | [YouTube](https://www.youtube.com/watch?v=XKvIfU1cRao) |
-| Pitch deck / slides (PPTX) | [`docs/VITVellore_StateShift_Submission.pptx`](docs/VITVellore_StateShift_Submission.pptx) |
-| Team declaration form (PDF) | [`docs/stateShift_declaration_form_filled_final.pdf`](docs/stateShift_declaration_form_filled_final.pdf) |
-| Architecture deep-dive | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
-| Known limitations | [`LIMITATIONS.md`](LIMITATIONS.md) |
-
-> Note: `ARCHITECTURE.md`, `LIMITATIONS.md`, `docs/PITCH_DECK.md` (a stale markdown draft, not the submitted deck above), and `docs/DEMO_SCRIPT.md` predate the Theme 05 pivot and may still describe the original open-brief scope — worth a pass before submission if they're going to be read alongside this README.
+| Demo video (under 5 minutes) | [Google Drive](https://drive.google.com/file/d/1YndsB2Jcz9WDvcaM8tGXdfnDzBvDV7bU/view?usp=sharing) |
+| Slides | [`docs/VITVellore_StateShift_Submission.pptx`](docs/VITVellore_StateShift_Submission.pptx) |
+| AI-usage declaration | [`docs/stateShift_declaration_form_filled_final.pdf`](docs/stateShift_declaration_form_filled_final.pdf) |
+| Architecture notes | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
+| Limitations | [`LIMITATIONS.md`](LIMITATIONS.md) |
 
 ---
 
-## 11. Repository Map
+## 12. Repository map
 
 ```
-replan/                  core runtime (A-owned: clock, state, commit, executor, runtime, recorder, replay)
-replan/agents/           LLM proposal layer (B-owned)
-replan/tools/            tool implementations + FDB-v3 contract (C-owned, registry frozen)
-web/                     evidence console (D-owned, contract.ts frozen)
-tests/                   acceptance suite
-bench/                   benchmark sweeps
-docs/                    demo script, pitch deck
+replan/        core runtime: state, commit gate, executor, recorder, replay, LiveKit adapter
+agent.py       live LiveKit voice agent (Gemini native audio)
+web/           console: replay of a recorded session
+tests/         acceptance tests
+docs/          slides and declaration form
+reproduce_fdb_v3.sh   one-command benchmark reproduction
 ```
