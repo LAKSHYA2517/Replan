@@ -665,7 +665,6 @@ export default function Timeline({ events }: TimelineProps) {
                 onMouseLeave={() => setHoveredResult(null)}
               >
                 {/* Glow circle behind diamond */}
-                <circle cx={cx} cy={cy} r="16" fill="#ef4444" fillOpacity="0.25" className="animate-ping" />
 
                 {/* Stale Leader Line upwards to Callout Box */}
                 <path

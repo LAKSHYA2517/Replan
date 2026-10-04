@@ -72,13 +72,13 @@ export function useReplay({
   subscribeLive,
 }: EventStreamOptions): { events: Event[]; state: StreamState; controls: ReplayControls | null } {
   const [cursor, setCursor] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(initialSpeed);
   const [liveEvents, setLiveEvents] = useState<Event[]>([]);
 
   useEffect(() => {
     setCursor(0);
-    setIsPlaying(true);
+    setIsPlaying(false);
     setLiveEvents([]);
   }, [source]);
 
@@ -121,7 +121,7 @@ export function useReplay({
       setSpeed,
       restart: () => {
         setCursor(0);
-        setIsPlaying(true);
+        setIsPlaying(false);
       },
     };
   }, [source, isPlaying, speed]);
