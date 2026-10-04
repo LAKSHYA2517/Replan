@@ -58,8 +58,10 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import json
 import logging
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -83,8 +85,13 @@ from replan.tools.registry import TOOL_SPECS
 
 load_dotenv()
 logger = logging.getLogger("replan.agent")
+logger.setLevel(logging.INFO)
 
 _TICK_INTERVAL = 0.2  # seconds between settle-loop drains while a session is live
+_ANNOUNCE_ATTEMPTS = 3
+_ANNOUNCE_RETRY_DELAY = 1.0  # seconds, via the injected clock
+_ANNOUNCE_POLL = 0.2  # seconds between checks for the agent to go idle
+_ANNOUNCE_MAX_WAIT = 15.0  # seconds to wait for idle before speaking anyway
 
 TOOL_DESCRIPTIONS: dict[str, str] = {
     "search_flights": "Search available flights to a destination on a given date.",
@@ -112,6 +119,7 @@ class SessionData:
     runtime: Runtime
     task_counter: itertools.count = field(default_factory=itertools.count)
     seen_dispatch_fps: set[str] = field(default_factory=set)
+    room_name: str = ""
 
 
 def _build_runtime() -> Runtime:
@@ -130,7 +138,33 @@ def _compose_response(committed_results: list[dict]) -> str:
     """
     if not committed_results:
         return "Nothing has been confirmed yet."
-    return " ".join(f"{item['tool']} completed with result: {item['payload']}" for item in committed_results)
+    return " ".join(
+        f"{item['tool'].replace('_', ' ')} result: {_describe(item['payload'])}." for item in committed_results
+    )
+
+
+def _describe(value) -> str:
+    if isinstance(value, dict):
+        parts = [f"{k.replace('_', ' ')} {_describe(v)}" for k, v in value.items() if not (k == "status" and v == "success")]
+        return ", ".join(parts) or "done"
+    if isinstance(value, list):
+        return "; ".join(_describe(v) for v in value) or "none"
+    return str(value)
+
+
+_TOOL_CALL_TELEMETRY = "/tmp/agent_tool_calls.log"
+
+
+def _record_tool_call(room_name: str, tool_name: str, args: dict) -> None:
+    """Append the call where FDB-v3's scorer collects actual tool calls
+    (run_tool_benchmark.py reads this exact path and room-name key). Without
+    it every example scores as 'no tool called', regardless of what the
+    agent actually did.
+    """
+    now = time.time()
+    record = {"room": room_name, "call": {"function": tool_name, "args": args, "timestamp_start": now, "timestamp_end": now}}
+    with open(_TOOL_CALL_TELEMETRY, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record) + "\n")
 
 
 async def _dispatch_via_state(session_data: SessionData, tool_name: str, args: dict) -> str:
@@ -149,6 +183,8 @@ async def _dispatch_via_state(session_data: SessionData, tool_name: str, args: d
     task = PlanTask(id=task_id, tool=tool_name, arg_spec=arg_spec, status=TaskStatus.PENDING)
     runtime.plan.tasks[task_id] = task
     runtime.executor.dispatch(task, runtime.plan)
+    _record_tool_call(session_data.room_name, tool_name, args)
+    logger.info("dispatch %s args=%s", task_id, args)
     return "On it — I'll let you know as soon as that's done."
 
 
@@ -268,9 +304,14 @@ async def _settle_loop(session: AgentSession, session_data: SessionData) -> None
     livekit-plugins-google source before writing this).
     """
     runtime = session_data.runtime
+    logged_decisions = 0
+    announcements: set[asyncio.Task] = set()
     while True:
         await runtime.clock.sleep(_TICK_INTERVAL)
         verdicts = runtime.tick()
+        for decision in runtime.gate.ledger[logged_decisions:]:
+            logger.info("verdict %s %s: %s", decision.call_id, decision.verdict.value, decision.reason)
+        logged_decisions = len(runtime.gate.ledger)
         if Verdict.COMMIT not in verdicts:
             continue
 
@@ -287,20 +328,44 @@ async def _settle_loop(session: AgentSession, session_data: SessionData) -> None
             continue
 
         text = _compose_response(committed_results)
-        session.generate_reply(
-            instructions=(
-                "Tell the user, briefly and in your own voice, exactly and only "
-                f"the following confirmed fact(s) — do not add, infer, or embellish "
-                f"anything not listed here: {text}"
-            )
-        )
+        announcement = asyncio.create_task(_announce(session, runtime.clock, text))
+        announcements.add(announcement)
+        announcement.add_done_callback(announcements.discard)
+
+
+async def _announce(session: AgentSession, clock, text: str) -> None:
+    """Speak one committed result, retrying if the realtime model fails to
+    generate it (observed live: 'generate_reply timed out waiting for
+    generation_created' right after a tool call, which silently dropped
+    that answer). Runs as its own task so a slow generation never stalls
+    the settle loop's ticks.
+    """
+    instructions = (
+        "Say one natural spoken sentence that states the following confirmed "
+        "facts. Do not read out field names or labels, and do not add, infer, "
+        f"or embellish anything not listed here: {text}"
+    )
+    waited = 0.0
+    while session.agent_state in ("speaking", "thinking") and waited < _ANNOUNCE_MAX_WAIT:
+        await clock.sleep(_ANNOUNCE_POLL)
+        waited += _ANNOUNCE_POLL
+    for attempt in range(_ANNOUNCE_ATTEMPTS):
+        handle = session.generate_reply(instructions=instructions)
+        await handle
+        if handle.exception() is None:
+            return
+        logger.warning("announcement attempt %d failed: %r", attempt + 1, handle.exception())
+        await clock.sleep(_ANNOUNCE_RETRY_DELAY)
+    logger.error("giving up on announcement after %d attempts: %s", _ANNOUNCE_ATTEMPTS, text)
 
 
 async def entrypoint(ctx: JobContext) -> None:
+    logger.info("job entered, connecting to room")
     await ctx.connect()
+    logger.info("connected to room")
 
     runtime = _build_runtime()
-    session_data = SessionData(runtime=runtime)
+    session_data = SessionData(runtime=runtime, room_name=ctx.room.name)
 
     session: AgentSession[SessionData] = AgentSession(
         userdata=session_data,
@@ -316,27 +381,52 @@ async def entrypoint(ctx: JobContext) -> None:
         # classifier on every partial. LiveKit's own turn detection
         # already handles barge-in (B1) — this is purely the freeze
         # decision, not audio control.
+        logger.info("user transcript (final=%s): %s", event.is_final, event.transcript)
         if not event.is_final:
             runtime.on_partial(event.transcript)
 
     settle_task = asyncio.create_task(_settle_loop(session, session_data))
+    settle_task.add_done_callback(
+        lambda t: logger.error("settle loop died: %r", t.exception())
+        if not t.cancelled() and t.exception() is not None
+        else None
+    )
 
-    try:
-        await session.start(
+    @session.on("close")
+    def _on_close(_event) -> None:
+        settle_task.cancel()
+
+    await session.start(
             agent=Agent(
                 instructions=(
                     "You are a helpful assistant for travel, finance, housing, "
-                    "and e-commerce tasks. Use the available tools to search, "
-                    "book, and look things up. When you call a tool, tell the "
-                    "user you're working on it — the actual result will be "
-                    "reported back to them separately once it's ready."
+                    "and e-commerce tasks. The user speaks English. "
+                    "Every request that asks for a search, a lookup, a booking, "
+                    "a change, or an addition needs a tool call. Call the "
+                    "matching tool in that same turn, before saying anything "
+                    "else, even if the request is long or has several parts; "
+                    "for several parts, call one tool for each part. Do not "
+                    "ask follow-up questions before searching: once you know "
+                    "what the user wants, call the tool with the details they "
+                    "have given, and fill any missing detail with the most "
+                    "reasonable value. Only ask about missing details after "
+                    "you have results to show. Never say "
+                    "you are searching, booking, or changing something unless "
+                    "you have actually called the tool. "
+                    "When you fill in tool arguments, copy values exactly as the "
+                    "user said them: keep identifiers, order numbers, document "
+                    "numbers, card names, and product names word for word, with "
+                    "no added or removed hyphens, spaces, or letters. Keep dates "
+                    "exactly as the user said them, without adding a year. "
+                    "Write amounts and counts as plain numbers, without currency "
+                    "symbols or words. After calling a tool, tell the user you're "
+                    "working on it — the actual result will be reported back "
+                    "to them separately once it's ready."
                 ),
                 tools=build_tools(),
             ),
             room=ctx.room,
-        )
-    finally:
-        settle_task.cancel()
+    )
 
 
 if __name__ == "__main__":
