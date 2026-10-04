@@ -10,3 +10,7 @@ bench/.mplconfig/
 tests/.tmp_bench/
 .DS_Store
 .env
+
+# Reproduction script working folders
+.fdb_v3/
+results/

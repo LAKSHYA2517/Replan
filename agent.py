@@ -58,10 +58,11 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import json
 import logging
 import os
+import time
 from dataclasses import dataclass, field
-from datetime import date
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -118,6 +119,7 @@ class SessionData:
     runtime: Runtime
     task_counter: itertools.count = field(default_factory=itertools.count)
     seen_dispatch_fps: set[str] = field(default_factory=set)
+    room_name: str = ""
 
 
 def _build_runtime() -> Runtime:
@@ -150,6 +152,21 @@ def _describe(value) -> str:
     return str(value)
 
 
+_TOOL_CALL_TELEMETRY = "/tmp/agent_tool_calls.log"
+
+
+def _record_tool_call(room_name: str, tool_name: str, args: dict) -> None:
+    """Append the call where FDB-v3's scorer collects actual tool calls
+    (run_tool_benchmark.py reads this exact path and room-name key). Without
+    it every example scores as 'no tool called', regardless of what the
+    agent actually did.
+    """
+    now = time.time()
+    record = {"room": room_name, "call": {"function": tool_name, "args": args, "timestamp_start": now, "timestamp_end": now}}
+    with open(_TOOL_CALL_TELEMETRY, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record) + "\n")
+
+
 async def _dispatch_via_state(session_data: SessionData, tool_name: str, args: dict) -> str:
     """Write the call's args into SessionState under a per-tool namespace,
     then dispatch a task whose arg_spec references that state via $ref —
@@ -166,6 +183,7 @@ async def _dispatch_via_state(session_data: SessionData, tool_name: str, args: d
     task = PlanTask(id=task_id, tool=tool_name, arg_spec=arg_spec, status=TaskStatus.PENDING)
     runtime.plan.tasks[task_id] = task
     runtime.executor.dispatch(task, runtime.plan)
+    _record_tool_call(session_data.room_name, tool_name, args)
     logger.info("dispatch %s args=%s", task_id, args)
     return "On it — I'll let you know as soon as that's done."
 
@@ -342,10 +360,12 @@ async def _announce(session: AgentSession, clock, text: str) -> None:
 
 
 async def entrypoint(ctx: JobContext) -> None:
+    logger.info("job entered, connecting to room")
     await ctx.connect()
+    logger.info("connected to room")
 
     runtime = _build_runtime()
-    session_data = SessionData(runtime=runtime)
+    session_data = SessionData(runtime=runtime, room_name=ctx.room.name)
 
     session: AgentSession[SessionData] = AgentSession(
         userdata=session_data,
@@ -361,6 +381,7 @@ async def entrypoint(ctx: JobContext) -> None:
         # classifier on every partial. LiveKit's own turn detection
         # already handles barge-in (B1) — this is purely the freeze
         # decision, not audio control.
+        logger.info("user transcript (final=%s): %s", event.is_final, event.transcript)
         if not event.is_final:
             runtime.on_partial(event.transcript)
 
@@ -379,15 +400,26 @@ async def entrypoint(ctx: JobContext) -> None:
             agent=Agent(
                 instructions=(
                     "You are a helpful assistant for travel, finance, housing, "
-                    "and e-commerce tasks. The user speaks English. Today is "
-                    f"{date.today().isoformat()}. When the user gives a date "
-                    "without a year, use the next upcoming occurrence of that "
-                    "date. For every "
-                    "request that needs a search, booking, lookup, or any other "
-                    "action, you MUST call the matching tool in that same turn, "
-                    "before saying anything else. Never say you are searching, "
-                    "booking, or looking something up unless you have actually "
-                    "called the tool. After calling a tool, tell the user you're "
+                    "and e-commerce tasks. The user speaks English. "
+                    "Every request that asks for a search, a lookup, a booking, "
+                    "a change, or an addition needs a tool call. Call the "
+                    "matching tool in that same turn, before saying anything "
+                    "else, even if the request is long or has several parts; "
+                    "for several parts, call one tool for each part. Do not "
+                    "ask follow-up questions before searching: once you know "
+                    "what the user wants, call the tool with the details they "
+                    "have given, and fill any missing detail with the most "
+                    "reasonable value. Only ask about missing details after "
+                    "you have results to show. Never say "
+                    "you are searching, booking, or changing something unless "
+                    "you have actually called the tool. "
+                    "When you fill in tool arguments, copy values exactly as the "
+                    "user said them: keep identifiers, order numbers, document "
+                    "numbers, card names, and product names word for word, with "
+                    "no added or removed hyphens, spaces, or letters. Keep dates "
+                    "exactly as the user said them, without adding a year. "
+                    "Write amounts and counts as plain numbers, without currency "
+                    "symbols or words. After calling a tool, tell the user you're "
                     "working on it — the actual result will be reported back "
                     "to them separately once it's ready."
                 ),
