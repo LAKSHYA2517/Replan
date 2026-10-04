@@ -61,6 +61,7 @@ import itertools
 import logging
 import os
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -88,6 +89,8 @@ logger.setLevel(logging.INFO)
 _TICK_INTERVAL = 0.2  # seconds between settle-loop drains while a session is live
 _ANNOUNCE_ATTEMPTS = 3
 _ANNOUNCE_RETRY_DELAY = 1.0  # seconds, via the injected clock
+_ANNOUNCE_POLL = 0.2  # seconds between checks for the agent to go idle
+_ANNOUNCE_MAX_WAIT = 15.0  # seconds to wait for idle before speaking anyway
 
 TOOL_DESCRIPTIONS: dict[str, str] = {
     "search_flights": "Search available flights to a destination on a given date.",
@@ -133,7 +136,18 @@ def _compose_response(committed_results: list[dict]) -> str:
     """
     if not committed_results:
         return "Nothing has been confirmed yet."
-    return " ".join(f"{item['tool']} completed with result: {item['payload']}" for item in committed_results)
+    return " ".join(
+        f"{item['tool'].replace('_', ' ')} result: {_describe(item['payload'])}." for item in committed_results
+    )
+
+
+def _describe(value) -> str:
+    if isinstance(value, dict):
+        parts = [f"{k.replace('_', ' ')} {_describe(v)}" for k, v in value.items() if not (k == "status" and v == "success")]
+        return ", ".join(parts) or "done"
+    if isinstance(value, list):
+        return "; ".join(_describe(v) for v in value) or "none"
+    return str(value)
 
 
 async def _dispatch_via_state(session_data: SessionData, tool_name: str, args: dict) -> str:
@@ -309,10 +323,14 @@ async def _announce(session: AgentSession, clock, text: str) -> None:
     the settle loop's ticks.
     """
     instructions = (
-        "Tell the user, briefly and in your own voice, exactly and only "
-        f"the following confirmed fact(s) — do not add, infer, or embellish "
-        f"anything not listed here: {text}"
+        "Say one natural spoken sentence that states the following confirmed "
+        "facts. Do not read out field names or labels, and do not add, infer, "
+        f"or embellish anything not listed here: {text}"
     )
+    waited = 0.0
+    while session.agent_state in ("speaking", "thinking") and waited < _ANNOUNCE_MAX_WAIT:
+        await clock.sleep(_ANNOUNCE_POLL)
+        waited += _ANNOUNCE_POLL
     for attempt in range(_ANNOUNCE_ATTEMPTS):
         handle = session.generate_reply(instructions=instructions)
         await handle
@@ -361,7 +379,10 @@ async def entrypoint(ctx: JobContext) -> None:
             agent=Agent(
                 instructions=(
                     "You are a helpful assistant for travel, finance, housing, "
-                    "and e-commerce tasks. The user speaks English. For every "
+                    "and e-commerce tasks. The user speaks English. Today is "
+                    f"{date.today().isoformat()}. When the user gives a date "
+                    "without a year, use the next upcoming occurrence of that "
+                    "date. For every "
                     "request that needs a search, booking, lookup, or any other "
                     "action, you MUST call the matching tool in that same turn, "
                     "before saying anything else. Never say you are searching, "
