@@ -5,8 +5,6 @@ import { EventType, Verdict } from '../contract.ts';
 
 interface IncidentReplayProps {
   allEvents: Event[];
-  onReplay: () => void;
-  disabled?: boolean;
 }
 
 interface IncidentSummary {
@@ -60,7 +58,7 @@ function summarize(events: Event[]): IncidentSummary {
   };
 }
 
-export default function IncidentReplay({ allEvents, onReplay, disabled = false }: IncidentReplayProps) {
+export default function IncidentReplay({ allEvents }: IncidentReplayProps) {
   const summary = useMemo(() => summarize(allEvents), [allEvents]);
 
   return (
@@ -91,11 +89,6 @@ export default function IncidentReplay({ allEvents, onReplay, disabled = false }
         <Stat label="wrong actions" value={summary.wrongActions} tone={summary.wrongActions > 0 ? 'text-red-400' : 'text-emerald-400'} />
       </div>
 
-      <div className="mt-6 flex justify-center">
-        <button onClick={onReplay} disabled={disabled} className="btn-primary px-5 py-2 tracking-wider">
-          &#9654; Replay incident
-        </button>
-      </div>
     </section>
   );
 }

@@ -24,8 +24,44 @@ interface ReplanCommit {
   t: number;
 }
 
+
+type StepState = 'done' | 'bad' | 'good' | 'todo';
+
+function deriveSequence(events: Event[]) {
+  const sent = events.some((e) => e.type === EventType.TASK_DISPATCH);
+  const changed = events.filter((e) => e.type === EventType.STATE_PATCH).length >= 2;
+  const staleAt = events.findIndex((e) => e.type === EventType.VERDICT && e.payload.verdict === Verdict.STALE);
+  const commitAfter = staleAt >= 0 && events.slice(staleAt + 1).some(
+    (e) => e.type === EventType.VERDICT && e.payload.verdict === Verdict.COMMIT
+  );
+  return { sent, changed, stale: staleAt >= 0, commitAfter };
+}
+
+const stepIcon: Record<StepState, string> = { done: '\u2713', bad: '\u2715', good: '\u2713', todo: '\u2022' };
+const stepColor: Record<StepState, string> = {
+  done: 'text-slate-300',
+  bad: 'text-red-300',
+  good: 'text-emerald-300',
+  todo: 'text-dim',
+};
+
+function StepList({ steps }: { steps: { label: string; state: StepState }[] }) {
+  return (
+    <ol className="mt-4 space-y-1.5 font-mono text-[11px]">
+      {steps.map((step, i) => (
+        <li key={i} className={`flex items-center gap-2 ${stepColor[step.state]}`}>
+          <span className="w-3 text-center font-bold">{stepIcon[step.state]}</span>
+          <span>{step.label}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 export default function DualPane({ events }: DualPaneProps) {
   const [flashing, setFlashing] = useState<boolean>(false);
+  const seq = deriveSequence(events);
+
 
   // The replan side of the comparison, derived the same honest way as the
   // baseline below: scan the real event stream, don't assume the invariant.
@@ -220,6 +256,15 @@ export default function DualPane({ events }: DualPaneProps) {
               <span className="eyebrow mb-1.5 block">Last baseline action</span>
               <div className="subpanel px-2.5 py-2 text-[11px] text-slate-300">{baselineState.lastAction}</div>
             </div>
+            <StepList
+              steps={[
+                { label: 'Request sent', state: seq.sent ? 'done' : 'todo' },
+                { label: 'User changes destination', state: seq.changed ? 'done' : 'todo' },
+                seq.stale
+                  ? { label: 'Old result arrives and is applied: wrong action', state: 'bad' }
+                  : { label: 'Old result arrives', state: 'todo' },
+              ]}
+            />
           </div>
 
           {/* Bottom Footnote */}
@@ -263,6 +308,18 @@ export default function DualPane({ events }: DualPaneProps) {
                 </ul>
               )}
             </div>
+            <StepList
+              steps={[
+                { label: 'Request sent', state: seq.sent ? 'done' : 'todo' },
+                { label: 'User changes destination', state: seq.changed ? 'done' : 'todo' },
+                seq.stale
+                  ? { label: 'Old result arrives and is rejected as stale', state: 'bad' }
+                  : { label: 'Old result arrives', state: 'todo' },
+                seq.commitAfter
+                  ? { label: 'New result committed', state: 'good' }
+                  : { label: 'New result committed', state: 'todo' },
+              ]}
+            />
           </div>
 
           {/* Bottom Callout */}

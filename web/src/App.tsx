@@ -14,9 +14,33 @@ interface AppProps {
   subscribeLive?: LiveEventSubscriber;
 }
 
+const REPLAY_SPEED = 0.25;
+
+function Hero() {
+  return (
+    <header className="relative overflow-hidden rounded-xl border border-line bg-[#0b0e14] px-6 py-10 sm:px-10">
+      <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-cyan-500/10 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-24 left-1/4 h-64 w-64 rounded-full bg-emerald-500/5 blur-3xl" />
+      <div className="relative flex flex-col gap-4">
+        <p className="eyebrow text-cyan-400">RePlan · Theme 05</p>
+        <h1 className="max-w-3xl font-display text-5xl font-bold leading-tight tracking-tight text-hi sm:text-6xl">
+          Nothing commits until it's <span className="text-cyan-300">still true.</span>
+        </h1>
+        <div className="flex items-center gap-4">
+          <span className="h-px w-10 bg-cyan-400/60" />
+          <p className="font-display text-lg font-medium tracking-wide text-slate-300 sm:text-xl">
+            Stale results get <span className="font-semibold text-red-400">rejected</span>, never{' '}
+            <span className="font-semibold text-emerald-300">applied</span>.
+          </p>
+        </div>
+      </div>
+    </header>
+  );
+}
+
 export default function App({
   source = 'fixture',
-  speed = 1,
+  speed = REPLAY_SPEED,
   subscribeLive,
 }: AppProps) {
   const { events, controls } = useReplay({ source, speed, subscribeLive });
@@ -24,45 +48,26 @@ export default function App({
   const lastEvent = events[events.length - 1];
 
   return (
-    <main className="relative min-h-screen px-5 py-8 text-slate-100 sm:px-8">
-      <div className="bg-dot-grid pointer-events-none fixed inset-0 -z-10 opacity-70 [mask-image:radial-gradient(ellipse_70%_70%_at_50%_0%,black,transparent)]" />
+    <main className="relative min-h-screen px-5 py-10 text-slate-100 sm:px-8">
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-[#08090c]" />
+      <div className="bg-dot-grid pointer-events-none fixed inset-0 -z-10 opacity-60 [mask-image:radial-gradient(ellipse_70%_60%_at_50%_0%,black,transparent)]" />
 
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-5">
-        <header className="panel flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="eyebrow text-cyan-400">RePlan - </p>
-            <h1 className="mt-1 font-mono text-xl font-bold text-hi">Nothing commits until it's still true</h1>
-          </div>
-          <div className="flex items-center gap-3 font-mono text-xs">
-            <span className="flex items-center gap-1.5 rounded border border-red-900/50 bg-red-950/20 px-3 py-1.5 font-semibold text-red-400">
-              <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
-              {source === 'fixture' ? 'LIVE REPLAY' : 'LIVE · LIVEKIT'}
-            </span>
-            <span className="rounded border border-line bg-black/20 px-3 py-1.5 text-dim">SESSION #0421</span>
-          </div>
-        </header>
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+        <Hero />
+
+        <IncidentReplay allEvents={source === 'fixture' ? fixtureEvents : events} />
 
         <WorldState events={events} />
 
-        <IncidentReplay
-          allEvents={source === 'fixture' ? fixtureEvents : events}
-          onReplay={() => controls?.restart()}
-          disabled={controls === null}
-        />
-
         <CausalGraph events={events} />
 
-        <div className="space-y-3">
+        <div className="space-y-4">
           <Timeline events={events} />
           {controls !== null && (
             <Scrubber
               totalEvents={controls.totalEvents}
               currentSeq={events.length}
               onScrubToSeq={controls.scrubTo}
-              isPlaying={controls.isPlaying}
-              onTogglePlay={controls.togglePlay}
-              speed={controls.speed}
-              onSetSpeed={controls.setSpeed}
               currentHash={currentHash}
               currentTime={lastEvent?.t ?? 0}
               currentStateVersion={lastEvent?.state_version ?? 0}

@@ -164,13 +164,61 @@ async def _run_demo(from_city: str = "Chicago", to_city: str = "Boston") -> None
     print(f"final state: {dict(runtime.store.current.slots)}")
 
 
+async def _run_incar_demo(from_destination: str = "Chicago", to_destination: str = "Denver") -> None:
+    """Extension use case: in-car navigation. A route to from_destination is
+    started, then the driver changes the destination before that route is
+    confirmed. The stale route is rejected and only the new route commits.
+    Same adapter path as the flight demo, using the in-car tools.
+    """
+    import asyncio
+
+    from replan.tools import incar
+    from replan.tools.registry import TOOL_SPECS
+
+    async def commit_printer(committed: list[dict]) -> None:
+        for c in committed:
+            print(f"  spoken: committed {c['tool']} -> {c['payload']}")
+
+    clock = RealClock()
+
+    def timed(fn, latency: float):
+        async def tool(args: dict, idem: str) -> dict:
+            await clock.sleep(latency)
+            return await fn(args, idem)
+        return tool
+
+    names = ("set_destination", "start_navigation", "cancel_route", "revert_destination")
+    tools = {name: timed(getattr(incar, name), TOOL_SPECS[name]["latency"]) for name in names}
+    runtime = build_scenario_runtime(tools, seed=7)
+    settle_task = asyncio.create_task(settle_loop(runtime, commit_printer, tick_interval=0.1))
+
+    print(f"=== In-car extension: destination changed before the route is confirmed ({from_destination} -> {to_destination}) ===")
+    route_tool_call_via_state(runtime, "start_navigation", {"destination": from_destination})
+    await runtime.clock.sleep(0.05)  # the driver changes the destination before the first route confirms
+    route_tool_call_via_state(runtime, "start_navigation", {"destination": to_destination})
+
+    await runtime.clock.sleep(2.0)
+    settle_task.cancel()
+
+    print(f"\nverdict ledger ({len(runtime.gate.ledger)} decisions):")
+    for d in runtime.gate.ledger:
+        print(f"  {d.call_id:>10} | {d.verdict.value:>7} | {d.reason}")
+    print(f"active route: {dict(incar.INCAR_STATE['navigation'])}")
+
+
 if __name__ == "__main__":
     import argparse
     import asyncio
 
     parser = argparse.ArgumentParser(description="LiveKit adapter self-correction demo")
+    parser.add_argument("--scenario", choices=["flight", "incar"], default="flight")
     parser.add_argument("--from-city", dest="from_city", default="Chicago")
     parser.add_argument("--to-city", dest="to_city", default="Boston")
+    parser.add_argument("--from-destination", dest="from_destination", default="Chicago")
+    parser.add_argument("--to-destination", dest="to_destination", default="Denver")
     args = parser.parse_args()
 
-    asyncio.run(_run_demo(args.from_city, args.to_city))
+    if args.scenario == "incar":
+        asyncio.run(_run_incar_demo(args.from_destination, args.to_destination))
+    else:
+        asyncio.run(_run_demo(args.from_city, args.to_city))
